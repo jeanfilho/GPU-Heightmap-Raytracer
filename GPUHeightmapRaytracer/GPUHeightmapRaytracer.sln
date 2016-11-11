@@ -5,10 +5,16 @@ VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GPUHeightmapRaytracer", "GPUHeightmapRaytracer\GPUHeightmapRaytracer.vcxproj", "{52538313-6A73-4DF5-9057-CC73D718F953}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PointdataGenerator", "..\PointdataGenerator\PointdataGenerator.vcxproj", "{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
 		Debug|x86 = Debug|x86
+		Generate Cloud Data|x64 = Generate Cloud Data|x64
+		Generate Cloud Data|x86 = Generate Cloud Data|x86
+		Generate Point Data|x64 = Generate Point Data|x64
+		Generate Point Data|x86 = Generate Point Data|x86
 		Release|x64 = Release|x64
 		Release|x86 = Release|x86
 	EndGlobalSection
@@ -17,10 +23,34 @@ Global
 		{52538313-6A73-4DF5-9057-CC73D718F953}.Debug|x64.Build.0 = Debug|x64
 		{52538313-6A73-4DF5-9057-CC73D718F953}.Debug|x86.ActiveCfg = Debug|Win32
 		{52538313-6A73-4DF5-9057-CC73D718F953}.Debug|x86.Build.0 = Debug|Win32
+		{52538313-6A73-4DF5-9057-CC73D718F953}.Generate Cloud Data|x64.ActiveCfg = Release|x64
+		{52538313-6A73-4DF5-9057-CC73D718F953}.Generate Cloud Data|x64.Build.0 = Release|x64
+		{52538313-6A73-4DF5-9057-CC73D718F953}.Generate Cloud Data|x86.ActiveCfg = Release|Win32
+		{52538313-6A73-4DF5-9057-CC73D718F953}.Generate Cloud Data|x86.Build.0 = Release|Win32
+		{52538313-6A73-4DF5-9057-CC73D718F953}.Generate Point Data|x64.ActiveCfg = Release|x64
+		{52538313-6A73-4DF5-9057-CC73D718F953}.Generate Point Data|x64.Build.0 = Release|x64
+		{52538313-6A73-4DF5-9057-CC73D718F953}.Generate Point Data|x86.ActiveCfg = Release|Win32
+		{52538313-6A73-4DF5-9057-CC73D718F953}.Generate Point Data|x86.Build.0 = Release|Win32
 		{52538313-6A73-4DF5-9057-CC73D718F953}.Release|x64.ActiveCfg = Release|x64
 		{52538313-6A73-4DF5-9057-CC73D718F953}.Release|x64.Build.0 = Release|x64
 		{52538313-6A73-4DF5-9057-CC73D718F953}.Release|x86.ActiveCfg = Release|Win32
 		{52538313-6A73-4DF5-9057-CC73D718F953}.Release|x86.Build.0 = Release|Win32
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Debug|x64.ActiveCfg = Debug|x64
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Debug|x64.Build.0 = Debug|x64
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Debug|x86.ActiveCfg = Debug|Win32
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Debug|x86.Build.0 = Debug|Win32
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Generate Cloud Data|x64.ActiveCfg = Generate Cloud Data|x64
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Generate Cloud Data|x64.Build.0 = Generate Cloud Data|x64
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Generate Cloud Data|x86.ActiveCfg = Generate Cloud Data|Win32
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Generate Cloud Data|x86.Build.0 = Generate Cloud Data|Win32
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Generate Point Data|x64.ActiveCfg = Generate Point Data|x64
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Generate Point Data|x64.Build.0 = Generate Point Data|x64
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Generate Point Data|x86.ActiveCfg = Generate Point Data|Win32
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Generate Point Data|x86.Build.0 = Generate Point Data|Win32
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Release|x64.ActiveCfg = Release|x64
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Release|x64.Build.0 = Release|x64
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Release|x86.ActiveCfg = Release|Win32
+		{67F2C8B8-AF14-490C-BFC5-2E0272808BFF}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
