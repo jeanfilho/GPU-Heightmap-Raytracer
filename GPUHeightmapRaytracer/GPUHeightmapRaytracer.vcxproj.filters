@@ -18,13 +18,18 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\main.cu">
+    <CudaCompile Include="src\CudaKernel.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="src\CudaKernel.cu">
+    <ClInclude Include="src\CudaKernel.cuh">
       <Filter>Source Files</Filter>
-    </CudaCompile>
+    </ClInclude>
   </ItemGroup>
 </Project>

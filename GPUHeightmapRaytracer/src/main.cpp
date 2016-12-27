@@ -19,42 +19,83 @@
 #define GLM_FORCE_CUDA
 
 #include <iostream>
-#include <GL/freeglut.h>
+#include <fstream>
 #include <thread>
+#include <GL/freeglut.h>
 #include <glm/glm.hpp>
 
-#include "CudaKernel.cu"
-
-/*
- * CUDA Device Variables
- */
-glm::vec3 *d_pointBuffer;
+#include "CudaKernel.cuh"
+#include <string>
 
 
+#define ar(r, c) (ar[ r*gpu_grid_res + c])
 
-/*
- *============================
- *HELPER FUNCTIONS
- *============================
- */
+//============================
+//		GLOBAL VARIABLES
+//============================
 
+int const gpu_grid_res = 1024;
+int const cpu_grid_res = 2048;
 
-void initCuda(int pointBufferSize)
+float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
+
+//============================
+//		CUDA VARIABLES
+//============================
+
+float *d_gpu_pointBuffer;
+float *h_gpu_pointBuffer;
+
+//============================
+//		HELPER FUNCTIONS
+//============================
+
+/*Load Point Data from disk*/
+void loadPointData()
 {
-	checkCudaErrors(cudaMalloc((void**)&d_pointBuffer, sizeof(glm::vec3) * pointBufferSize));
+	std::cout << "Loading points... ";
+
+	std::ifstream file("../Data/data");
+	std::string line, data;
+
+	float x, y, z;
+	while (std::getline(file, line) && !line.empty())
+	{
+		size_t start = 0, end = line.find(" ");
+		data = line.substr(start, end - start);
+		x = (stof(data));
+
+		start = end + 1;
+		end = line.find(" ", start + 1);
+		data = line.substr(start, end - start);
+		z = (stof(data));
+
+		start = end + 1;
+		data = line.substr(start, end - start);
+		y = (stof(data));
+
+		cpu_pointBuffer[int(x)][int(z)] = y;
+	}
+	file.close();
+
+	std::cout << "done" << std::endl;
 }
 
-void exitCuda()
-{
-	checkCudaErrors(cudaFree(&d_pointBuffer));
-}
+//============================
+//		THREAD FUNCTIONS
+//============================
 
 
-/*
- *=============================
- * GLUT FUNCTIONS
- *=============================
- */
+//============================
+//		GLUT FUNCTIONS
+//============================
+
+
+
+//============================
+//		GLUT FUNCTIONS
+//============================
+
 /* process menu option 'op' */
 void menu(int op) {
 
@@ -69,11 +110,11 @@ void menu(int op) {
 void keyboardDown(unsigned char key, int x, int y) {
 
 	switch (key) {
-		case 'Q':
-		case 'q':
-		case 27:
-			// ESC
-			exit(0);
+	case 'Q':
+	case 'q':
+	case 27:
+		// ESC
+		exit(0);
 	}
 }
 
@@ -146,23 +187,24 @@ void initGL(int width, int height) {
 	glDepthFunc(GL_LEQUAL);
 }
 
-/*
- * Initialize program
- */
+//============================
+//			MAIN
+//============================
+
+/* Allocate resources */
 void initialize()
 {
-	std::cout << "Initializing resources... " << std::endl;
-	initCuda(300);
+	checkCudaErrors(cudaMalloc(&d_gpu_pointBuffer, sizeof(float) * gpu_grid_res * gpu_grid_res));
+	h_gpu_pointBuffer = new float[gpu_grid_res*gpu_grid_res];
+
+	loadPointData();
 }
 
-/*
- * Exit program
- */
-void exit()
+/* Free Resources */
+void freeResourcers()
 {
-	std::cout << "Freeing resources..." << std::endl;
-	exitCuda();
-	std::cin.get();
+	checkCudaErrors(cudaFree(d_gpu_pointBuffer));
+	free(h_gpu_pointBuffer);
 }
 
 /* initialize GLUT settings, register callbacks, enter main loop */
@@ -199,7 +241,7 @@ int main(int argc, char** argv) {
 	glutAttachMenu(GLUT_RIGHT_BUTTON);
 
 	initialize();
-	atexit(exit);
+	atexit(freeResourcers);
 	initGL(800, 600);
 
 	glutMainLoop();

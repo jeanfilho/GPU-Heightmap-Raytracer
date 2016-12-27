@@ -140,7 +140,10 @@
     <CudaCompile Include="src\CudaKernel.cu" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\main.cu" />
+    <ClCompile Include="src\main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\CudaKernel.cuh" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
