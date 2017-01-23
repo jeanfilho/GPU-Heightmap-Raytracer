@@ -2,7 +2,7 @@
 
 namespace CudaSpace
 {
-	__device__ void rayTrace()
+	__device__ void rayTrace(cudaGraphicsResource* cuda_pbo_resource)
 	{
 	}
 }

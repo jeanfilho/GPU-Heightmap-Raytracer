@@ -21,11 +21,17 @@
 #include <iostream>
 #include <fstream>
 #include <thread>
+#include <string>
+
+#include <GL/glew.h>
 #include <GL/freeglut.h>
 #include <glm/glm.hpp>
 
+#include <cuda_gl_interop.h>
+#include <cuda_runtime.h>
+
 #include "CudaKernel.cuh"
-#include <string>
+#include "helper_cuda.h"
 
 
 #define ar(r, c) (ar[ r*gpu_grid_res + c])
@@ -37,7 +43,12 @@
 int const gpu_grid_res = 1024;
 int const cpu_grid_res = 2048;
 
+glm::ivec2 const window_resolution(800, 600);
+
 float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
+
+GLuint textureID;
+GLuint bufferID;
 
 //============================
 //		CUDA VARIABLES
@@ -45,6 +56,8 @@ float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
 float *d_gpu_pointBuffer;
 float *h_gpu_pointBuffer;
+
+struct cudaGraphicsResource *cuda_pbo_resource;
 
 //============================
 //		HELPER FUNCTIONS
@@ -81,6 +94,55 @@ void loadPointData()
 	std::cout << "done" << std::endl;
 }
 
+/*Snippet from http://www.nvidia.com/content/GTC/documents/1055_GTC09.pdf 
+ * and http://www.songho.ca/opengl/gl_pbo.html
+ * 
+ * This method sets up a texture object and its respective buffers to share with CUDA device
+ * 
+ * GL_TEXTURE_RECTANGLE is used to avoid generating mip maps and wasting resources
+ * Source: https://www.khronos.org/opengl/wiki/Rectangle_Texture
+ */
+// Setup Texture
+void setupTexture()
+{
+	// Generate a buffer ID
+	glGenBuffers(1, &bufferID);
+	// Make this the current UNPACK buffer (OpenGL is state-based)
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, bufferID);
+	// Allocate data for the buffer. 4-channel 8-bit image
+	glBufferData(GL_PIXEL_UNPACK_BUFFER, window_resolution.x * window_resolution.y * 4, NULL, GL_DYNAMIC_COPY);
+	// Registers the buffer object specified by buffer for access by CUDA.A handle to the registered object is returned as resource. Source: http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__OPENGL.html#group__CUDART__OPENGL_1g0fd33bea77ca7b1e69d1619caf44214b
+	checkCudaErrors(cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, bufferID, cudaGraphicsRegisterFlagsNone));
+
+	// Enable Texturing
+	glEnable(GL_TEXTURE_RECTANGLE);
+	// Generate a texture ID
+	glGenTextures(1, &textureID);
+	// Make this the current texture (remember that GL is state-based)
+	glBindTexture(GL_TEXTURE_RECTANGLE, textureID);
+	// Allocate the texture memory. The last parameter is NULL since we only
+	// want to allocate memory, not initialize it
+	glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, window_resolution.x, window_resolution.y, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+	
+	// Must set the filter mode to avoid any altering in the resulting image and reduce performance cost
+	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP);
+	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP);
+}
+
+void updateTexture()
+{
+	//Synchronize OpenGL and CPU calls before working on the buffer object
+	checkCudaErrors(cudaGraphicsMapResources(1, &cuda_pbo_resource, 0));
+
+	//TODO: call cuda API method
+//	CudaSpace::rayTrace(cuda_pbo_resource);
+
+	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
+	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
+}
+
 //============================
 //		THREAD FUNCTIONS
 //============================
@@ -89,7 +151,6 @@ void loadPointData()
 //============================
 //		GLUT FUNCTIONS
 //============================
-
 
 
 //============================
@@ -116,21 +177,6 @@ void keyboardDown(unsigned char key, int x, int y) {
 		// ESC
 		exit(0);
 	}
-}
-
-/* executed when a regular key is released */
-void keyboardUp(unsigned char key, int x, int y) {
-
-}
-
-/* executed when a special key is pressed */
-void keyboardSpecialDown(int k, int x, int y) {
-
-}
-
-/* executed when a special key is released */
-void keyboardSpecialUp(int k, int x, int y) {
-
 }
 
 /* reshaped window */
@@ -165,6 +211,7 @@ void draw() {
 	glLoadIdentity();
 
 	/* render the scene here */
+	updateTexture();
 
 	glFlush();
 	glutSwapBuffers();
@@ -187,17 +234,21 @@ void initGL(int width, int height) {
 	glDepthFunc(GL_LEQUAL);
 }
 
-//============================
-//			MAIN
-//============================
 
+//============================
+//        RESOURCES
+//============================
 /* Allocate resources */
 void initialize()
 {
+	glewInit();
+	
+	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
 	checkCudaErrors(cudaMalloc(&d_gpu_pointBuffer, sizeof(float) * gpu_grid_res * gpu_grid_res));
 	h_gpu_pointBuffer = new float[gpu_grid_res*gpu_grid_res];
 
 	loadPointData();
+	setupTexture();
 }
 
 /* Free Resources */
@@ -207,6 +258,10 @@ void freeResourcers()
 	free(h_gpu_pointBuffer);
 }
 
+
+//============================
+//			MAIN
+//============================
 /* initialize GLUT settings, register callbacks, enter main loop */
 int main(int argc, char** argv) {
 
@@ -219,9 +274,6 @@ int main(int argc, char** argv) {
 
 	// register glut call backs
 	glutKeyboardFunc(keyboardDown);
-	glutKeyboardUpFunc(keyboardUp);
-	glutSpecialFunc(keyboardSpecialDown);
-	glutSpecialUpFunc(keyboardSpecialUp);
 	glutMouseFunc(mouseClick);
 	glutMotionFunc(mouseMotion);
 	glutReshapeFunc(reshape);
@@ -239,6 +291,7 @@ int main(int argc, char** argv) {
 	glutAddSubMenu("Sub Menu", subMenu);
 	glutAddMenuEntry("Quit", 'q');
 	glutAttachMenu(GLUT_RIGHT_BUTTON);
+
 
 	initialize();
 	atexit(freeResourcers);
