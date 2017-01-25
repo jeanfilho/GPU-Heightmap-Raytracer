@@ -43,7 +43,7 @@
 int const gpu_grid_res = 1024;
 int const cpu_grid_res = 2048;
 
-glm::ivec2 const window_resolution(800, 600);
+glm::ivec2 const texture_resolution(800, 600);
 
 float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
@@ -111,7 +111,7 @@ void setupTexture()
 	// Make this the current UNPACK buffer (OpenGL is state-based)
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, bufferID);
 	// Allocate data for the buffer. 4-channel 8-bit image
-	glBufferData(GL_PIXEL_UNPACK_BUFFER, window_resolution.x * window_resolution.y * 4, NULL, GL_DYNAMIC_COPY);
+	glBufferData(GL_PIXEL_UNPACK_BUFFER, texture_resolution.x * texture_resolution.y * 4, NULL, GL_DYNAMIC_COPY);
 	// Registers the buffer object specified by buffer for access by CUDA.A handle to the registered object is returned as resource.
 	// Source: http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__OPENGL.html#group__CUDART__OPENGL_1g0fd33bea77ca7b1e69d1619caf44214b
 	checkCudaErrors(cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, bufferID, cudaGraphicsRegisterFlagsNone));
@@ -124,7 +124,7 @@ void setupTexture()
 	glBindTexture(GL_TEXTURE_RECTANGLE, textureID);
 	// Allocate the texture memory. The last parameter is NULL since we only want to allocate memory, not initialize it
 	// https://www.khronos.org/opengl/wiki/GLAPI/glTexBuffer
-	glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, window_resolution.x, window_resolution.y, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, texture_resolution.x, texture_resolution.y, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
 
 	// Must set the filter mode to avoid any altering in the resulting image and reduce performance cost
 	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -149,8 +149,8 @@ void updateTexture()
 
 	//Call the wrapper method invoking the CUDA Kernel
 	//TODO: optmize Grid and Block sizes
-	dim3 gridSize = window_resolution.x;
-	dim3 blockSize = window_resolution.y;
+	dim3 gridSize = texture_resolution.x;
+	dim3 blockSize = texture_resolution.y;
 	CudaSpace::rayTrace_w(gridSize, blockSize, devPtr, d_gpu_pointBuffer);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
@@ -166,7 +166,7 @@ void renderTexture()
 	// Copy texture data from buffer;
 	glBindTexture(GL_TEXTURE_RECTANGLE, textureID);
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, bufferID);
-	glTexSubImage2D(GL_TEXTURE_RECTANGLE, 0, 0, 0, window_resolution.x, window_resolution.y, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+	glTexSubImage2D(GL_TEXTURE_RECTANGLE, 0, 0, 0, texture_resolution.x, texture_resolution.y, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
 
 
 	//TODO: why??
@@ -323,7 +323,7 @@ int main(int argc, char** argv) {
 	glutInit(&argc, argv);
 
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
-	glutInitWindowSize(window_resolution.x, window_resolution.y);
+	glutInitWindowSize(800, 600);
 	glutInitWindowPosition(100, 100);
 	glutCreateWindow("GPU Heightmap Raytracer 2k16");
 
@@ -350,7 +350,7 @@ int main(int argc, char** argv) {
 
 	initialize();
 	atexit(freeResourcers);
-	initGL(window_resolution.x, window_resolution.y);
+	initGL(800, 600);
 
 	glutMainLoop();
 
