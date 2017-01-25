@@ -63,7 +63,7 @@ struct cudaGraphicsResource *cuda_pbo_resource;
 //		HELPER FUNCTIONS
 //============================
 
-/*Load Point Data from disk*/
+/*Load Point Data from disk -- TESTING PURPOSE ONLY*/
 void loadPointData()
 {
 	std::cout << "Loading points... ";
@@ -94,15 +94,16 @@ void loadPointData()
 	std::cout << "done" << std::endl;
 }
 
-/*Snippet from http://www.nvidia.com/content/GTC/documents/1055_GTC09.pdf 
+/*Snippet from http://www.nvidia.com/content/GTC/documents/1055_GTC09.pdf
  * and http://www.songho.ca/opengl/gl_pbo.html
- * 
+ *
  * This method sets up a texture object and its respective buffers to share with CUDA device
- * 
+ *
  * GL_TEXTURE_RECTANGLE is used to avoid generating mip maps and wasting resources
  * Source: https://www.khronos.org/opengl/wiki/Rectangle_Texture
+ *
  */
-// Setup Texture
+ // Setup Texture
 void setupTexture()
 {
 	// Generate a buffer ID
@@ -111,7 +112,8 @@ void setupTexture()
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, bufferID);
 	// Allocate data for the buffer. 4-channel 8-bit image
 	glBufferData(GL_PIXEL_UNPACK_BUFFER, window_resolution.x * window_resolution.y * 4, NULL, GL_DYNAMIC_COPY);
-	// Registers the buffer object specified by buffer for access by CUDA.A handle to the registered object is returned as resource. Source: http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__OPENGL.html#group__CUDART__OPENGL_1g0fd33bea77ca7b1e69d1619caf44214b
+	// Registers the buffer object specified by buffer for access by CUDA.A handle to the registered object is returned as resource.
+	// Source: http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__OPENGL.html#group__CUDART__OPENGL_1g0fd33bea77ca7b1e69d1619caf44214b
 	checkCudaErrors(cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, bufferID, cudaGraphicsRegisterFlagsNone));
 
 	// Enable Texturing
@@ -120,36 +122,88 @@ void setupTexture()
 	glGenTextures(1, &textureID);
 	// Make this the current texture (remember that GL is state-based)
 	glBindTexture(GL_TEXTURE_RECTANGLE, textureID);
-	// Allocate the texture memory. The last parameter is NULL since we only
-	// want to allocate memory, not initialize it
+	// Allocate the texture memory. The last parameter is NULL since we only want to allocate memory, not initialize it
+	// https://www.khronos.org/opengl/wiki/GLAPI/glTexBuffer
 	glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, window_resolution.x, window_resolution.y, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
-	
+
 	// Must set the filter mode to avoid any altering in the resulting image and reduce performance cost
 	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP);
 	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP);
+
+	// Unbind texture and buffer
+	glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 }
 
 void updateTexture()
 {
-	//Synchronize OpenGL and CPU calls before working on the buffer object
+	//Synchronize OpenGL and CPU calls before locking and working on the buffer object
 	checkCudaErrors(cudaGraphicsMapResources(1, &cuda_pbo_resource, 0));
 
-	//TODO: call cuda API method
-//	CudaSpace::rayTrace(cuda_pbo_resource);
+	//Get a pointer to the memory position in the CUDA device (GPU)
+	unsigned char *devPtr;
+	size_t size;
+	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
+
+	//Call the wrapper method invoking the CUDA Kernel
+	//TODO: optmize Grid and Block sizes
+	dim3 gridSize = window_resolution.x;
+	dim3 blockSize = window_resolution.y;
+	CudaSpace::rayTrace_w(gridSize, blockSize, devPtr, d_gpu_pointBuffer);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
 }
 
+void renderTexture()
+{
+
+	int width = glutGet(GLUT_WINDOW_WIDTH),
+		height = glutGet(GLUT_WINDOW_HEIGHT);
+
+	// Copy texture data from buffer;
+	glBindTexture(GL_TEXTURE_RECTANGLE, textureID);
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, bufferID);
+	glTexSubImage2D(GL_TEXTURE_RECTANGLE, 0, 0, 0, window_resolution.x, window_resolution.y, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+
+
+	//TODO: why??
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadIdentity();
+	glOrtho(0.0, width, 0.0, height, -1.0, 1.0);
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+
+
+	// Draw a quad and apply texture
+	glEnable(GL_TEXTURE_RECTANGLE);
+	{
+		glBegin(GL_QUADS);
+			glTexCoord2i(0, 0); glVertex2i(0, 0);
+			glTexCoord2i(1, 0); glVertex2i(width, 0);
+			glTexCoord2i(1, 1); glVertex2i(width, height);
+			glTexCoord2i(0, 1); glVertex2i(0, height);
+		glEnd();
+	}
+	glDisable(GL_TEXTURE_RECTANGLE);
+
+	// Unbind buffer and texture
+	glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+	//TODO: why??
+	glDisable(GL_TEXTURE_2D);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+}
+
 //============================
 //		THREAD FUNCTIONS
-//============================
-
-
-//============================
-//		GLUT FUNCTIONS
 //============================
 
 
@@ -212,6 +266,7 @@ void draw() {
 
 	/* render the scene here */
 	updateTexture();
+	renderTexture();
 
 	glFlush();
 	glutSwapBuffers();
@@ -242,7 +297,7 @@ void initGL(int width, int height) {
 void initialize()
 {
 	glewInit();
-	
+
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
 	checkCudaErrors(cudaMalloc(&d_gpu_pointBuffer, sizeof(float) * gpu_grid_res * gpu_grid_res));
 	h_gpu_pointBuffer = new float[gpu_grid_res*gpu_grid_res];
@@ -268,7 +323,7 @@ int main(int argc, char** argv) {
 	glutInit(&argc, argv);
 
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
-	glutInitWindowSize(800, 600);
+	glutInitWindowSize(window_resolution.x, window_resolution.y);
 	glutInitWindowPosition(100, 100);
 	glutCreateWindow("GPU Heightmap Raytracer 2k16");
 
@@ -295,7 +350,7 @@ int main(int argc, char** argv) {
 
 	initialize();
 	atexit(freeResourcers);
-	initGL(800, 600);
+	initGL(window_resolution.x, window_resolution.y);
 
 	glutMainLoop();
 

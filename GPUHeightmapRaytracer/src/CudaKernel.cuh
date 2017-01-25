@@ -3,7 +3,10 @@
 #include <glm/glm.hpp>
 #include <cstdio>
 
+#include <cuda.h>
 #include <cuda_runtime.h>
+#include <cuda_runtime_api.h>
+#include <device_launch_parameters.h>
 
 /*
 * Code snippet from
@@ -19,7 +22,15 @@
 //	}
 //}
 
+
+/*
+ * This class contains all the CUDA related functions and kernels
+ *
+ * Functions that are callable from the host side are declared with "_w" in the end
+ * 
+ */
 namespace CudaSpace
 {
-	void rayTrace(cudaGraphicsResource* cuda_pbo_resource);
+	__host__ void rayTrace_w(dim3 gridSize, dim3 blockSize, unsigned char* buffer, float* d_gpu_pointBuffer);
+	__global__ void rayTrace(unsigned char* buffer, float* d_gpu_pointBuffer);
 }
