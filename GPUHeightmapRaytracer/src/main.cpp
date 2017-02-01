@@ -46,11 +46,11 @@ glm::ivec2 texture_resolution(640, 480);
 
 float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
-float frame_distance = 20;
 glm::vec3
-camera_position(0, 50, 0),
-camera_forward = glm::normalize(glm::vec3(0, -1, 0)),
-camera_right = glm::normalize(glm::vec3(1, 0, 0));
+	camera_position(0, 50, 0),
+	camera_forward = glm::normalize(glm::vec3(0, -1, 0)),
+	camera_right = glm::normalize(glm::vec3(1, 0, 0)),
+	frame_dimension(1, 1, 10); //width, height, distance from camera
 
 GLuint textureID;
 GLuint bufferID;
@@ -162,7 +162,7 @@ void updateTexture()
 
 	//Call the wrapper method invoking the CUDA Kernel
 
-	CudaSpace::rayTrace(texture_resolution, frame_distance, camera_forward, camera_right, camera_position.y, devPtr, d_gpu_pointBuffer, gpu_grid_res);
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_right, camera_position.y, devPtr, d_gpu_pointBuffer, gpu_grid_res);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
