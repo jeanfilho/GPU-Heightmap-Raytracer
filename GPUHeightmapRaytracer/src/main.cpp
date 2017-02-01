@@ -39,18 +39,18 @@
 //		GLOBAL VARIABLES
 //============================
 
-int const gpu_grid_res = 1024;
-int const cpu_grid_res = 1024;
+int const gpu_grid_res = 512;
+int const cpu_grid_res = 512;
 
 glm::ivec2 texture_resolution(640, 480);
 
 float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
 glm::vec3
-	camera_position(0, 50, 0),
+	camera_position(0, 500, 0),
 	camera_forward = glm::normalize(glm::vec3(0, -1, 0)),
 	camera_right = glm::normalize(glm::vec3(1, 0, 0)),
-	frame_dimension(1, 1, 10); //width, height, distance from camera
+	frame_dimension(1, 1, 250); //width, height, distance from camera
 
 GLuint textureID;
 GLuint bufferID;
@@ -97,7 +97,7 @@ void loadPointData()
 		data = line.substr(start, end - start);
 		y = (stof(data));
 
-		cpu_pointBuffer[int(x) + 512 - 128][int(z) + 512 - 128] = y;
+		cpu_pointBuffer[int(x) + 256 - 128][int(z) + 256 - 128] = y;
 	}
 	file.close();
 
@@ -246,6 +246,39 @@ void setUpGPUPointBuffer()
 //		GLUT FUNCTIONS
 //============================
 
+
+/*Displays FPS from http://stackoverflow.com/questions/20866508/using-glut-to-simply-print-text*/
+void drawFPS()
+{
+	int width = glutGet(GLUT_WINDOW_WIDTH),
+		height = glutGet(GLUT_WINDOW_HEIGHT);
+
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadIdentity();
+	gluOrtho2D(0, width, 0, height);
+
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadIdentity();
+	glRasterPos2i(10, 10);
+
+	current_frame = sys_clock.now();
+	delta_time = current_frame - last_frame;
+	last_frame = current_frame;
+	std::string text = "FPS " + std::to_string(1 / delta_time.count());
+	
+	for (int i = 0; i < text.length(); ++i) {
+		glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_10, text[i]);
+	}
+
+	glPopMatrix();
+
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+}
+
 /* process menu option 'op' */
 void menu(int op)
 {
@@ -307,15 +340,10 @@ void draw()
 	updateTexture();
 	renderTexture();
 
+	drawFPS();
+
 	glFlush();
 	glutSwapBuffers();
-
-	std::string text = "FPS " + std::to_string(1 / delta_time.count());
-	current_frame = sys_clock.now();
-	delta_time = current_frame - last_frame;
-	last_frame = current_frame;
-	std::cout << std::string(text.length() +1, '\b');
-	std::cout << text;
 }
 
 /* executed when program is idle */
