@@ -1,6 +1,9 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <glm/gtx/quaternion.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/detail/func_common.hpp>
 #include <cstdio>
 
 #include <cuda.h>
@@ -31,6 +34,7 @@
  */
 namespace CudaSpace
 {
-	__host__ void rayTrace_w(dim3 gridSize, dim3 blockSize, unsigned char* buffer, float* d_gpu_pointBuffer);
-	__global__ void rayTrace(unsigned char* buffer, float* d_gpu_pointBuffer);
+	__host__ void rayTrace(glm::ivec2& texture_resolution, float frame_distance, glm::vec3& camera_forward, glm::vec3& camera_right, float camera_height, unsigned char* colorBuffer, float* d_gpu_pointBuffer, int gpu_grid_res);
+	__host__ void initializeDeviceVariables();
+	__host__ void freeDeviceVariables();
 }
