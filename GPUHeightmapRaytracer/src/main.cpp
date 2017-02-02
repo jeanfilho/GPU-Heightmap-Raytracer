@@ -39,8 +39,8 @@
 //		GLOBAL VARIABLES
 //============================
 
-int const gpu_grid_res = 512;
-int const cpu_grid_res = 512;
+int const gpu_grid_res = 1025;
+int const cpu_grid_res = 1025;
 
 glm::ivec2 texture_resolution(640, 480);
 
@@ -48,12 +48,14 @@ float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
 glm::vec3
 	camera_position(0, 500, 0),
-	camera_forward = glm::normalize(glm::vec3(0, -1, 0)),
+	camera_forward = glm::normalize(glm::vec3(0, -1, -1)),
 	camera_right = glm::normalize(glm::vec3(1, 0, 0)),
-	frame_dimension(1, 1, 250); //width, height, distance from camera
+	frame_dimension(1, 1, 100); //width, height, distance from camera
 
 GLuint textureID;
 GLuint bufferID;
+
+float maxHeight = -FLT_MAX, minHeight = FLT_MAX;
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -81,6 +83,10 @@ void loadPointData()
 	std::ifstream file("../Data/data");
 	std::string line, data;
 
+	for (int x = 0; x < cpu_grid_res; ++x)
+		for (int z = 0; z < cpu_grid_res; ++z)
+			cpu_pointBuffer[x][z] = -100.0f;
+
 	float x, y, z;
 	while (std::getline(file, line) && !line.empty())
 	{
@@ -97,7 +103,12 @@ void loadPointData()
 		data = line.substr(start, end - start);
 		y = (stof(data));
 
-		cpu_pointBuffer[int(x) + 256 - 128][int(z) + 256 - 128] = y;
+		if (minHeight > y)
+			minHeight = y;
+		if (maxHeight < y)
+			maxHeight = y;
+
+		cpu_pointBuffer[int(glm::floor(x))][int(glm::floor(z))] = y;
 	}
 	file.close();
 
@@ -162,7 +173,7 @@ void updateTexture()
 
 	//Call the wrapper method invoking the CUDA Kernel
 
-	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_right, camera_position.y, devPtr, d_gpu_pointBuffer, gpu_grid_res);
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_right, camera_position.y, devPtr, d_gpu_pointBuffer, gpu_grid_res, minHeight, maxHeight);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
@@ -239,7 +250,7 @@ void setUpGPUPointBuffer()
 	//TODO: implement
 
 	//Send gpu point buffer to the gpu
-	checkCudaErrors(cudaMemcpy(cpu_pointBuffer, d_gpu_pointBuffer, gpu_grid_res*gpu_grid_res, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_gpu_pointBuffer, cpu_pointBuffer, sizeof(float) * gpu_grid_res * gpu_grid_res, cudaMemcpyHostToDevice));
 }
 
 //============================
@@ -337,6 +348,7 @@ void draw()
 	glLoadIdentity();
 
 	/* render the scene here */
+	setUpGPUPointBuffer();
 	updateTexture();
 	renderTexture();
 

@@ -7,7 +7,7 @@
 #include <sstream>
 #include <iomanip>
 
-int GRID_SIZE = 256 + 1;
+int GRID_SIZE = 1024 + 1;
 
 struct Point
 {
@@ -161,9 +161,9 @@ void addNoise(std::vector<std::vector<Point>>* grid, float noise)
 {
 	std::default_random_engine eng;
 	std::uniform_real_distribution<float> dist(-noise, noise);
-	for (int i = 0; i < GRID_SIZE; i++)
+	for (int i = 0; i < GRID_SIZE-1; i++)
 	{ 
-		for (int j = 0; j < GRID_SIZE; j++)
+		for (int j = 0; j < GRID_SIZE-1; j++)
 		{
 			(*grid)[i][j].z += dist(eng);
 			(*grid)[i][j].y += dist(eng);
@@ -174,9 +174,9 @@ void addNoise(std::vector<std::vector<Point>>* grid, float noise)
 
 void scaleData(std::vector<std::vector<Point>>* grid, float factor)
 {
-	for (int i = 0; i < GRID_SIZE; i++)
+	for (int i = 0; i < GRID_SIZE-1; i++)
 	{
-		for (int j = 0; j < GRID_SIZE; j++)
+		for (int j = 0; j < GRID_SIZE-1; j++)
 		{
 			(*grid)[i][j].z *= factor;
 		}
