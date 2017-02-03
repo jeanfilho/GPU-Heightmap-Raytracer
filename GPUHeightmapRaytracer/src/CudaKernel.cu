@@ -64,21 +64,26 @@ namespace CudaSpace
 		float tMaxX, tMaxZ, tDeltaX, tDeltaZ;
 		int posX, posZ;
 		char stepX, stepZ;
-		
-		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_position.x, ray_direction.x, 0);
-		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_position.z, ray_direction.z, 0);
 
-		///*Avoid almost perpendicular rays*/
-		//if(glm::abs(ray_direction.x) < minimun_ray_inclination ||
-		//	glm::abs(ray_direction.z) < minimun_ray_inclination)
-		//{
-		//	return glm::uvec3(255, 0, 0);
-		//}
-
-		/*Loop the DDA algorithm*/
 		int index = 0;
 		float tMax = 0;
 		glm::vec3 posVector;
+
+		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_position.x, ray_direction.x, 0);
+		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_position.z, ray_direction.z, 0);
+
+		/*Check if ray starts outside of the grid*/
+		if (posX >= grid_resolution || posX < 0 ||
+			posZ >= grid_resolution || posZ < 0)
+			return glm::zero<glm::uvec3>();
+
+		/*Check if ray starts under the heightmap*/
+		index = posX * grid_resolution + posZ;
+		if (point_buffer[index] >= ray_position.y)
+			return  glm::zero<glm::uvec3>();
+
+
+		/*Loop the DDA algorithm*/
 		while(true)
 		{
 
@@ -131,12 +136,15 @@ namespace CudaSpace
 		int threadId = blockIdx.y * gridDim.x + blockIdx.x;
 
 		glm::uvec3 color;
-		glm::vec3 ray_position, ray_direction;
+		glm::vec3 ray_position, ray_direction, up, right;
+
+		right = glm::cross(*camera_forward, glm::vec3(0,1,0));
+		up = glm::cross(right, *camera_forward);
 
 		ray_position = *grid_camera_position +
 			*camera_forward * frame_dimension->z +
-			(blockIdx.y - (texture_resolution->y - 1)/ 2.0f) * glm::cross(*camera_right, *camera_forward) +
-			(blockIdx.x - (texture_resolution->x - 1)/ 2.0f) * *camera_right;
+			(blockIdx.y * blockDim.y + threadIdx.y - (texture_resolution->y - 1)/ 2.0f) * up +
+			(blockIdx.x * blockDim.x + threadIdx.x - (texture_resolution->x - 1)/ 2.0f) * right;
 
 		ray_direction = glm::normalize(ray_position - *grid_camera_position);
 		color = castRay(ray_position, ray_direction, threadId);

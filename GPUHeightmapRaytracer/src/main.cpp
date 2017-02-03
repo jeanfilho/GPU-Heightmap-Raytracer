@@ -47,10 +47,10 @@ glm::ivec2 texture_resolution(640, 480);
 float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
 glm::vec3
-	camera_position(0, 500, 0),
-	camera_forward = glm::normalize(glm::vec3(0, -1, -1)),
+	camera_position(0, 200, 0),
+	camera_forward = glm::normalize(glm::vec3(0, -1, -3)),
 	camera_right = glm::normalize(glm::vec3(1, 0, 0)),
-	frame_dimension(1, 1, 100); //width, height, distance from camera
+	frame_dimension(100, 100, 100); //width, height, distance from camera
 
 GLuint textureID;
 GLuint bufferID;
@@ -83,10 +83,6 @@ void loadPointData()
 	std::ifstream file("../Data/data");
 	std::string line, data;
 
-	for (int x = 0; x < cpu_grid_res; ++x)
-		for (int z = 0; z < cpu_grid_res; ++z)
-			cpu_pointBuffer[x][z] = -100.0f;
-
 	float x, y, z;
 	while (std::getline(file, line) && !line.empty())
 	{
@@ -108,7 +104,7 @@ void loadPointData()
 		if (maxHeight < y)
 			maxHeight = y;
 
-		cpu_pointBuffer[int(glm::floor(x))][int(glm::floor(z))] = y;
+		cpu_pointBuffer[int(glm::floor(x)) + 512 - 128 ][int(glm::floor(z)) + 512 - 128] = y;
 	}
 	file.close();
 
