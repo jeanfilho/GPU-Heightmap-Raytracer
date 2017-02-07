@@ -128,8 +128,8 @@ namespace CudaSpace
 	__device__ glm::vec3 pixelToWindowSpace(glm::ivec2 &pixel_position)
 	{
 		glm::vec3 result = glm::vec3(
-			-frame_dimension->x / 2 + (frame_dimension->x) * pixel_position.x / (texture_resolution->x - 1),
-			-frame_dimension->y / 2 + (frame_dimension->y) * pixel_position.y / (texture_resolution->y - 1),
+			-frame_dimension->x / 2.0f + (frame_dimension->x) * pixel_position.x / (texture_resolution->x - 1),
+			-frame_dimension->y / 2.0f + (frame_dimension->y) * pixel_position.y / (texture_resolution->y - 1),
 			-frame_dimension->z);
 		return result;
 	}
@@ -188,11 +188,10 @@ namespace CudaSpace
 		v = glm::cross(w, u);
 		*pixel_to_grid_matrix =
 			glm::mat3x3(
-				u.x, u.y, -u.z, 
-				v.x, v.y, -v.z, 
-				w.x, w.y, -w.z
+				 u.x, v.x, w.x,
+				 u.y, v.y, w.y,
+				-u.z,-v.z,-w.z
 			);
-		*pixel_to_grid_matrix = glm::transpose(*pixel_to_grid_matrix);
 
 	}
 	__global__ void cuda_initializeDeviceVariables()
