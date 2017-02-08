@@ -184,11 +184,12 @@ namespace CudaSpace
 
 		/*Basis change matrix from view to grid space (RH to LH)*/
 		glm::vec3 u, v, w;
+		camera_for.y = -camera_for.y;
 		w = camera_for;
 		u = glm::normalize(glm::cross(glm::vec3(0, 100, 0), w));
 		v = glm::cross(w, u);
 		
-		w = -w;
+
 		*pixel_to_grid_matrix = (glm::mat3x3(u,v,w));
 
 	}
