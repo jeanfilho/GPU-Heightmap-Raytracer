@@ -39,6 +39,8 @@
 //		GLOBAL VARIABLES
 //============================
 
+std::string filename = "data_1024";
+
 int const gpu_grid_res = 1025;
 int const cpu_grid_res = 1025;
 
@@ -48,7 +50,7 @@ float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
 glm::vec3
 	camera_position(0, 800, 0),
-	camera_forward = glm::normalize(glm::vec3(-0.1, -.9, 0)),
+	camera_forward = glm::normalize(glm::vec3(-0.3, -.9, 0)),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 
 GLuint textureID;
@@ -79,7 +81,7 @@ void loadPointData()
 {
 	std::cout << "Loading points... ";
 
-	std::ifstream file("../Data/data");
+	std::ifstream file("../Data/" + filename);
 	std::string line, data;
 
 	float x, y, z;
