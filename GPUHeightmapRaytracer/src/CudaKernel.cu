@@ -44,7 +44,7 @@ namespace CudaSpace
 		 *Calculate the first intersection in the grid and
 		 *the distance between each axis intersection with the grid
 		 */
-		if (ray_direction == 0)
+		if (glm::abs(ray_direction) < 0.00001f)
 		{
 			tMax = FLT_MAX;
 			tDelta = 0;
@@ -67,16 +67,15 @@ namespace CudaSpace
 		int posX, posZ;
 		char stepX, stepZ;
 
-		int index = 0;
+		int index;
 		float tMax = 0;
-		glm::vec3 posVector;
+		glm::dvec3 current_ray_position;
 
 		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, 0);
 		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, 0);
 
 		/*Check if ray starts outside of the grid*/
-		if (posX >= grid_resolution || posX < 0 ||
-			posZ >= grid_resolution || posZ < 0)
+		if (posX >= grid_resolution || posX < 0 || posZ >= grid_resolution || posZ < 0)
 			return glm::zero<glm::uvec3>();
 
 		/*Check if ray starts under the heightmap*/
@@ -84,39 +83,40 @@ namespace CudaSpace
 		if (point_buffer[index] >= ray_origin.y)
 			return  glm::zero<glm::uvec3>();
 
-
 		/*Loop the DDA algorithm*/
 		while(true)
 		{
 
+			/*Check if ray intersects - Texel intersection from See Dick, C., et al. (2009). GPU ray-casting for scalable terrain rendering. Proceedings of EUROGRAPHICS, Citeseer. Page */
+			if (ray_direction.y >= 0)
+				current_ray_position = ray_origin + ray_direction * (tMaxX < tMaxZ ? tDeltaX + tMaxX : tDeltaZ + tMaxZ);
+			else
+				current_ray_position = ray_origin + ray_direction * glm::min(tMaxX, tMaxZ);
+
+			index = posX * grid_resolution + posZ;
+			if(point_buffer[index] >= current_ray_position.y)
+			{
+				float factor = point_buffer[index] / (maxHeight - minHeight);
+				return glm::uvec3(255 * factor, 0, 0);
+			}
+
 			/*Advance ray through the grid*/
 			if(tMaxX < tMaxZ)
 			{
-				posVector = ray_origin + ray_direction * tMax;
 				tMaxX += tDeltaX;
-				tMax = tMaxX;
 				posX += stepX;
 			}
 			else
 			{
-				posVector = ray_origin + ray_direction * tMax;
 				tMaxZ += tDeltaZ;
-				tMax = tMaxZ;
 				posZ += stepZ;
 			}
+
+
 			/*Check if ray is outside of the grid*/
-			if (posX >= grid_resolution || posX < 0 ||
-				posZ >= grid_resolution || posZ < 0)
+			if (posX >= grid_resolution || posX < 0 || posZ >= grid_resolution || posZ < 0)
 			{
 				return glm::zero<glm::uvec3>();
-			}
-
-			/*Check if ray intersects*/
-			index = posX * grid_resolution + posZ;
-			if (point_buffer[index] >= posVector.y)
-			{
-				float factor = point_buffer[index] / (maxHeight - minHeight);
-				return glm::uvec3(255*factor, 0, 0);
 			}
 		}
 	}
@@ -151,15 +151,19 @@ namespace CudaSpace
 		int threadId = blockIdx.y * gridDim.x + blockIdx.x;
 
 		glm::uvec3 color;
-		glm::vec3 ray_direction;
+		glm::vec3 ray_direction, ray_position;
 		glm::ivec2 pixel_position;
 
 		/*Get the pixel position of this thread*/
 		pixel_position = glm::ivec2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
 
 		/*Calculate ray direction and cast ray*/
-		ray_direction = glm::normalize(*pixel_to_grid_matrix * pixelToWindowSpace(pixel_position));
-		color = castRay(*grid_camera_position, ray_direction);
+		ray_direction = *pixel_to_grid_matrix * pixelToWindowSpace(pixel_position);
+		ray_position = ray_direction + *grid_camera_position;
+		ray_direction = glm::normalize(ray_direction);
+		if (blockIdx.x == 320)
+			color = glm::uvec3(1,2,3);
+		color = castRay(ray_position, ray_direction);
 
 		//GL_BGRA
 		colorBuffer[threadId * 3] = static_cast<unsigned char>(color.r);

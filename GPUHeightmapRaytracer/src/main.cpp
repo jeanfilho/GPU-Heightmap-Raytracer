@@ -48,8 +48,8 @@ float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
 glm::vec3
 	camera_position(0, 200, 0),
-	camera_forward = glm::normalize(glm::vec3(0, -1, -0.5f)),
-	frame_dimension(200, 200, 100); //width, height, distance from camera
+	camera_forward = glm::normalize(glm::vec3(0, -0.9f, -.1f)),
+	frame_dimension(50, 50, 50); //width, height, distance from camera
 
 GLuint textureID;
 GLuint bufferID;
