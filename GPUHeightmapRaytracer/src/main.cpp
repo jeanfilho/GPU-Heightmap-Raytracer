@@ -47,8 +47,8 @@ glm::ivec2 texture_resolution(640, 480);
 float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
 glm::vec3
-	camera_position(0, 200, 0),
-	camera_forward = glm::normalize(glm::vec3(-.3, -.2, -.5)),
+	camera_position(0, 800, 0),
+	camera_forward = glm::normalize(glm::vec3(-0.1, -.9, 0)),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 
 GLuint textureID;

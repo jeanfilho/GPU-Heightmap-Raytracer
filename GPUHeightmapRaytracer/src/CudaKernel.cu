@@ -56,6 +56,16 @@ namespace CudaSpace
 		}
 	}
 
+	/*
+	 * FOR DEBUG ONLY:
+	 */
+	__device__ glm::uvec3 testIntersectionResult(glm::vec3 pos, float height)
+	{
+		float rFactor = height / (maxHeight - minHeight);
+		float gFactor = pos.x / grid_resolution;
+		float bFactor = pos.z / grid_resolution;
+		return glm::uvec3(255 * rFactor, 255 * gFactor, 255 * bFactor);
+	}
 
 	/*
 	 *	Cast a ray through the grid {Amanatides, 1987 #22}
@@ -95,8 +105,7 @@ namespace CudaSpace
 			index = posX * grid_resolution + posZ;
 			if(point_buffer[index] >= current_ray_position.y)
 			{
-				float factor = point_buffer[index] / (maxHeight - minHeight);
-				return glm::uvec3(255 * factor, 0, 0);
+				return testIntersectionResult(current_ray_position, point_buffer[index]);
 			}
 
 			/*Advance ray through the grid*/
@@ -124,10 +133,10 @@ namespace CudaSpace
 	 * Converts a pixel position to the grid space
 	 * Pinhole camera model - From: Realistic Ray Tracing by Peter Shirley, pages 37-42
 	 */
-	__device__ glm::vec3 pixelToWindowSpace(glm::ivec2 &pixel_position)
+	__device__ glm::vec3 viewToGridSpace(glm::ivec2 &pixel_position)
 	{
 		glm::vec3 result = glm::vec3(
-			-frame_dimension->x / 2.0f + (frame_dimension->x) * pixel_position.x / (texture_resolution->x - 1),
+			frame_dimension->x / 2.0f - (frame_dimension->x) * pixel_position.x / (texture_resolution->x - 1),
 			-frame_dimension->y / 2.0f + (frame_dimension->y) * pixel_position.y / (texture_resolution->y - 1),
 			-frame_dimension->z);
 		return result;
@@ -157,7 +166,8 @@ namespace CudaSpace
 		pixel_position = glm::ivec2(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y);
 
 		/*Calculate ray direction and cast ray*/
-		ray_direction = *pixel_to_grid_matrix * pixelToWindowSpace(pixel_position);
+		ray_direction = (*pixel_to_grid_matrix * viewToGridSpace(pixel_position));
+
 		ray_position = ray_direction + *grid_camera_position;
 		ray_direction = glm::normalize(ray_direction);
 		color = castRay(ray_position, ray_direction);
@@ -182,13 +192,12 @@ namespace CudaSpace
 		*grid_camera_position = glm::vec3(grid_resolution / 2.0f, camera_height, grid_resolution / 2.0f);
 		*texture_resolution = texture_res;
 
-		/*Basis change matrix from view to grid space (RH to LH)*/
+		/*Basis change matrix from view to grid space*/
 		glm::vec3 u, v, w;
-		camera_for.y = -camera_for.y;
-		w = camera_for;
+				
+		w = -camera_for;
 		u = glm::normalize(glm::cross(glm::vec3(0, 100, 0), w));
 		v = glm::cross(w, u);
-		
 
 		*pixel_to_grid_matrix = (glm::mat3x3(u,v,w));
 
