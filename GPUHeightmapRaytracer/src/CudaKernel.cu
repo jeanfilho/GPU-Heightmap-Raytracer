@@ -68,7 +68,6 @@ namespace CudaSpace
 		char stepX, stepZ;
 
 		int index;
-		float tMax = 0;
 		glm::dvec3 current_ray_position;
 
 		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, 0);
@@ -161,8 +160,6 @@ namespace CudaSpace
 		ray_direction = *pixel_to_grid_matrix * pixelToWindowSpace(pixel_position);
 		ray_position = ray_direction + *grid_camera_position;
 		ray_direction = glm::normalize(ray_direction);
-		if (blockIdx.x == 320)
-			color = glm::uvec3(1,2,3);
 		color = castRay(ray_position, ray_direction);
 
 		//GL_BGRA
@@ -185,17 +182,14 @@ namespace CudaSpace
 		*grid_camera_position = glm::vec3(grid_resolution / 2.0f, camera_height, grid_resolution / 2.0f);
 		*texture_resolution = texture_res;
 
-		/*Basis change matrix - changing from left to right handed*/
+		/*Basis change matrix from view to grid space (RH to LH)*/
 		glm::vec3 u, v, w;
 		w = camera_for;
-		u = glm::normalize(glm::cross(glm::vec3(0, 1, 0), w));
+		u = glm::normalize(glm::cross(glm::vec3(0, 100, 0), w));
 		v = glm::cross(w, u);
-		*pixel_to_grid_matrix =
-			glm::mat3x3(
-				 u.x, v.x, w.x,
-				 u.y, v.y, w.y,
-				-u.z,-v.z,-w.z
-			);
+		
+		w = -w;
+		*pixel_to_grid_matrix = (glm::mat3x3(u,v,w));
 
 	}
 	__global__ void cuda_initializeDeviceVariables()

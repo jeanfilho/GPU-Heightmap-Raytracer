@@ -48,7 +48,7 @@ float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
 
 glm::vec3
 	camera_position(0, 200, 0),
-	camera_forward = glm::normalize(glm::vec3(0, -0.9f, -.1f)),
+	camera_forward = glm::normalize(glm::vec3(-.3, -.5, -.5)),
 	frame_dimension(50, 50, 50); //width, height, distance from camera
 
 GLuint textureID;
@@ -103,7 +103,7 @@ void loadPointData()
 		if (maxHeight < y)
 			maxHeight = y;
 
-		cpu_pointBuffer[int(glm::floor(x)) + 512 - 128 ][int(glm::floor(z)) + 512 - 128] = y;
+		cpu_pointBuffer[int(glm::floor(x))][int(glm::floor(z))] = y;
 	}
 	file.close();
 
