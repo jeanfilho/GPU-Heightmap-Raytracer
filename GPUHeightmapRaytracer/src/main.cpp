@@ -28,6 +28,8 @@
 #include <GL/freeglut.h>
 #include <glm/glm.hpp>
 
+#include "jpeglib.h"
+
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
 
@@ -39,7 +41,8 @@
 //		GLOBAL VARIABLES
 //============================
 
-std::string filename = "data_1024";
+std::string point_cloud_file = "data_1024";
+std::string color_map_file = "data_1024";
 
 int const gpu_grid_res = 1025;
 int const cpu_grid_res = 1025;
@@ -57,6 +60,10 @@ GLuint textureID;
 GLuint bufferID;
 
 float maxHeight = -FLT_MAX, minHeight = FLT_MAX;
+
+
+// jpeg image
+unsigned char *color_map = NULL;
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -76,8 +83,73 @@ struct cudaGraphicsResource* cuda_pbo_resource;
 //		HELPER FUNCTIONS
 //============================
 
+/*Loads JPEG image from disk*/
+bool loadJPEG(std::string filename)
+{
+
+	unsigned char *image_buffer, *it;
+	unsigned char r, g, b;
+	struct jpeg_decompress_struct cinfo;
+	struct jpeg_error_mgr jerr;
+	int width, height;
+	JSAMPARRAY pJpegBuffer;
+
+	cinfo.err = jpeg_std_error(&jerr);
+	jpeg_create_decompress(&cinfo);
+
+	/*Open JPEG and start decompression*/
+	int row_stride;
+	FILE * infile;
+	if (fopen_s(&infile, ("../Data/" + filename).c_str(), "rb") == NULL) {
+			fprintf(stderr, "can't open %s\n", filename.c_str());
+			return false;
+	}
+
+	jpeg_stdio_src(&cinfo, infile);
+	jpeg_read_header(&cinfo, TRUE);
+	jpeg_start_decompress(&cinfo);
+	
+	width = cinfo.output_width;
+	height = cinfo.output_height;
+	image_buffer = new unsigned char[width*height * 3];
+	it = image_buffer;
+
+	row_stride = width * cinfo.output_components;
+	pJpegBuffer = (*cinfo.mem->alloc_sarray)
+		(reinterpret_cast<j_common_ptr>(&cinfo), JPOOL_IMAGE, row_stride, 1);
+
+	/*Read data in JPEG*/
+	while (cinfo.output_scanline < cinfo.output_height)
+	{
+		jpeg_read_scanlines(&cinfo, pJpegBuffer, 1);
+		for (int x = 0; x < width; x++) {
+			r = pJpegBuffer[0][cinfo.output_components * x];
+			if (cinfo.output_components > 2) {
+				g = pJpegBuffer[0][cinfo.output_components * x + 1];
+				b = pJpegBuffer[0][cinfo.output_components * x + 2];
+			}
+			else {
+				g = r;
+				b = r;
+			}
+			*(it++) = r;
+			*(it++) = g;
+			*(it++) = b;
+		}
+	}
+
+	/*Finish decompression and release object*/
+	fclose(infile);
+	jpeg_finish_decompress(&cinfo);
+	jpeg_destroy_decompress(&cinfo);
+
+	color_map = image_buffer;
+
+	return true;
+}
+
 /*Load Point Data from disk -- TESTING PURPOSE ONLY*/
-void loadPointData()
+void loadPointDataXYZ(std::string filename)
 {
 	std::cout << "Loading points... ";
 
@@ -386,7 +458,8 @@ void initialize()
 	checkCudaErrors(cudaMalloc(&d_gpu_pointBuffer, sizeof(float) * gpu_grid_res * gpu_grid_res));
 	h_gpu_pointBuffer = new float[gpu_grid_res * gpu_grid_res];
 
-	loadPointData();
+	loadJPEG(color_map_file);
+	loadPointDataXYZ(point_cloud_file);
 	setupTexture();
 	CudaSpace::initializeDeviceVariables();
 }
@@ -398,6 +471,7 @@ void freeResourcers()
 	checkCudaErrors(cudaFree(d_gpu_pointBuffer));
 	free(h_gpu_pointBuffer);
 	CudaSpace::freeDeviceVariables();
+	if (color_map != NULL) free(color_map);
 }
 
 
