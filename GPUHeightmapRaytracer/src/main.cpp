@@ -15,7 +15,6 @@
 * Source: http://www.cprogramming.com/snippets/source-code/a-code-template-for-opengl-divide-glut
 *
 ***********************************************************/
-
 #define GLM_FORCE_CUDA
 
 #include <iostream>
@@ -28,7 +27,10 @@
 #include <GL/freeglut.h>
 #include <glm/glm.hpp>
 
-#include "jpeglib.h"
+#include <jpeglib.h>
+#include <jerror.h>
+
+#include <liblas/liblas.hpp>
 
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
@@ -41,8 +43,8 @@
 //		GLOBAL VARIABLES
 //============================
 
-std::string point_cloud_file = "data_1024";
-std::string color_map_file = "data_1024";
+std::string point_cloud_file = "autzen.las";
+std::string color_map_file = "autzen.jpg";
 
 int const gpu_grid_res = 1025;
 int const cpu_grid_res = 1025;
@@ -109,11 +111,13 @@ bool loadJPEG(std::string filename)
 	jpeg_read_header(&cinfo, TRUE);
 	jpeg_start_decompress(&cinfo);
 	
+	/*Get JPEG dimensions and allocate memory for the color map accourdingly*/
 	width = cinfo.output_width;
 	height = cinfo.output_height;
 	image_buffer = new unsigned char[width*height * 3];
 	it = image_buffer;
 
+	/*Allocates memory to store a stride of uncompressed JPEG data*/
 	row_stride = width * cinfo.output_components;
 	pJpegBuffer = (*cinfo.mem->alloc_sarray)
 		(reinterpret_cast<j_common_ptr>(&cinfo), JPOOL_IMAGE, row_stride, 1);
@@ -146,6 +150,12 @@ bool loadJPEG(std::string filename)
 	color_map = image_buffer;
 
 	return true;
+}
+
+/*Load Point Data from disk in LAS format*/
+void loadPointDataLAS(std::string filename)
+{
+	
 }
 
 /*Load Point Data from disk -- TESTING PURPOSE ONLY*/
@@ -184,16 +194,16 @@ void loadPointDataXYZ(std::string filename)
 	std::cout << "done" << std::endl;
 }
 
-/*Snippet from http://www.nvidia.com/content/GTC/documents/1055_GTC09.pdf
- * and http://www.songho.ca/opengl/gl_pbo.html
- *
+/*
  * This method sets up a texture object and its respective buffers to share with CUDA device
+ *
+ * Based on http://www.nvidia.com/content/GTC/documents/1055_GTC09.pdf
+ * and http://www.songho.ca/opengl/gl_pbo.html
  *
  * GL_TEXTURE_RECTANGLE is used to avoid generating mip maps and wasting resources
  * Source: https://www.khronos.org/opengl/wiki/Rectangle_Texture
  *
  */
- // Setup Texture
 void setupTexture()
 {
 	// Generate a buffer ID
@@ -459,7 +469,7 @@ void initialize()
 	h_gpu_pointBuffer = new float[gpu_grid_res * gpu_grid_res];
 
 	loadJPEG(color_map_file);
-	loadPointDataXYZ(point_cloud_file);
+	loadPointDataLAS(point_cloud_file);
 	setupTexture();
 	CudaSpace::initializeDeviceVariables();
 }
