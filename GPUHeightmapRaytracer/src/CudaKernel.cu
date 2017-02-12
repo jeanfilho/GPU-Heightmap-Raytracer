@@ -9,10 +9,11 @@ namespace CudaSpace
 {
 	
 	__device__ int grid_resolution;
-	__device__ float minimun_ray_inclination = 0.01f;
+	__device__ float minimum_ray_inclination = 0.01f;
 	__device__ float cell_size[] = {1,2,4};
 	__device__ float *point_buffer;
-	__device__ float maxHeight, minHeight;
+	__device__ unsigned char *color_map;
+	__device__ glm::ivec2 *color_map_resolution;
 	__device__ glm::vec3 *frame_dimension;
 	__device__ glm::vec3 *camera_forward;
 	__device__ glm::vec3 *grid_camera_position;
@@ -57,17 +58,6 @@ namespace CudaSpace
 	}
 
 	/*
-	 * FOR DEBUG ONLY:
-	 */
-	__device__ glm::uvec3 testIntersectionResult(glm::vec3 pos, float height)
-	{
-		float rFactor = height / (maxHeight - minHeight);
-		float gFactor = pos.x / grid_resolution;
-		float bFactor = pos.z / grid_resolution;
-		return glm::uvec3(255 * rFactor, 255 * gFactor, 255 * bFactor);
-	}
-
-	/*
 	 *	Cast a ray through the grid {Amanatides, 1987 #22}
 	 *	ray_direction MUST be normalized
 	 */
@@ -77,7 +67,7 @@ namespace CudaSpace
 		int posX, posZ;
 		char stepX, stepZ;
 
-		int index;
+		int height_index;
 		glm::dvec3 current_ray_position;
 
 		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, 0);
@@ -88,24 +78,25 @@ namespace CudaSpace
 			return glm::zero<glm::uvec3>();
 
 		/*Check if ray starts under the heightmap*/
-		index = posX * grid_resolution + posZ;
-		if (point_buffer[index] >= ray_origin.y)
+		height_index = posX * grid_resolution + posZ;
+		if (point_buffer[height_index] >= ray_origin.y)
 			return  glm::zero<glm::uvec3>();
 
 		/*Loop the DDA algorithm*/
 		while(true)
 		{
 
-			/*Check if ray intersects - Texel intersection from See Dick, C., et al. (2009). GPU ray-casting for scalable terrain rendering. Proceedings of EUROGRAPHICS, Citeseer. Page */
+			/*Check if ray intersects - Texel intersection from Dick, C., et al. (2009). GPU ray-casting for scalable terrain rendering. Proceedings of EUROGRAPHICS, Citeseer. Page */
 			if (ray_direction.y >= 0)
 				current_ray_position = ray_origin + ray_direction * (tMaxX < tMaxZ ? tDeltaX + tMaxX : tDeltaZ + tMaxZ);
 			else
 				current_ray_position = ray_origin + ray_direction * glm::min(tMaxX, tMaxZ);
 
-			index = posX * grid_resolution + posZ;
-			if(point_buffer[index] >= current_ray_position.y)
+			height_index = posX + grid_resolution * posZ;
+			if(point_buffer[height_index] >= current_ray_position.y)
 			{
-				return testIntersectionResult(current_ray_position, point_buffer[index]);
+				int color_index = posX + color_map_resolution->x * posZ;
+				return glm::ivec3(color_map[color_index * 3], color_map[color_index * 3 + 1], color_map[color_index * 3 + 2]);
 			}
 
 			/*Advance ray through the grid*/
@@ -171,7 +162,7 @@ namespace CudaSpace
 		ray_position = ray_direction + *grid_camera_position;
 		ray_direction = glm::normalize(ray_direction);
 		color = castRay(ray_position, ray_direction);
-
+		
 		//GL_BGRA
 		colorBuffer[threadId * 3] = static_cast<unsigned char>(color.r);
 		colorBuffer[threadId * 3 + 1] = static_cast<unsigned char>(color.g);
@@ -182,32 +173,32 @@ namespace CudaSpace
 	* Set device parameters
 	* TODO: replace with a single Memcpy call?
 	*/
-	__global__ void cuda_setParameters(int grid_res, glm::ivec2 texture_res, glm::vec3 frame_dim, glm::vec3 camera_for, float camera_height, float* d_gpu_pointBuffer, float minH, float maxH)
+	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, float camera_height)
 	{
-		grid_resolution = grid_res;
-		point_buffer = d_gpu_pointBuffer;
-		minHeight = minH;
-		maxHeight = maxH;
 		*frame_dimension = frame_dim;
 		*grid_camera_position = glm::vec3(grid_resolution / 2.0f, camera_height, grid_resolution / 2.0f);
-		*texture_resolution = texture_res;
 
 		/*Basis change matrix from view to grid space*/
 		glm::vec3 u, v, w;
-				
 		w = -camera_for;
 		u = glm::normalize(glm::cross(glm::vec3(0, 100, 0), w));
 		v = glm::cross(w, u);
-
 		*pixel_to_grid_matrix = (glm::mat3x3(u,v,w));
 
 	}
-	__global__ void cuda_initializeDeviceVariables()
+	__global__ void cuda_initializeDeviceVariables(int grid_res, glm::ivec2 texture_res, float* d_gpu_pointBuffer, unsigned char *d_color_map, glm::ivec2 color_map_res)
 	{
 		frame_dimension = static_cast<glm::vec3*>(malloc(sizeof(glm::vec3)));
 		grid_camera_position = static_cast<glm::vec3*>(malloc(sizeof(glm::vec3)));
 		texture_resolution = static_cast<glm::ivec2*>(malloc(sizeof(glm::ivec2)));
+		color_map_resolution = static_cast<glm::ivec2*>(malloc(sizeof(glm::ivec2)));
 		pixel_to_grid_matrix = static_cast<glm::mat3x3*>(malloc(sizeof(glm::mat3x3)));
+
+		grid_resolution = grid_res;
+		*texture_resolution = texture_res;	
+		point_buffer = d_gpu_pointBuffer;
+		color_map = d_color_map;
+		*color_map_resolution = color_map_res;
 	}
 	__global__ void cuda_freeDeviceVariables()
 	{
@@ -215,26 +206,27 @@ namespace CudaSpace
 		free(texture_resolution);
 		free(frame_dimension);
 		free(pixel_to_grid_matrix);
+		free(color_map_resolution);
 	}
 
 	/*
 	 * Set grid and block dimensions, pass parameters to device and call kernels
 	 */
-	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, float camera_height, unsigned char* colorBuffer, float* d_gpu_pointBuffer, int gpu_grid_res, float minHeight, float maxHeight)
+	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, float camera_height, unsigned char* colorBuffer)
 	{
 		//TODO: optimize Grid and Block sizes
 		dim3 gridSize(texture_resolution.x, texture_resolution.y);
 		dim3 blockSize(1);
 
-		cuda_setParameters << <1, 1 >> > (gpu_grid_res, texture_resolution, frame_dimensions, camera_forward, camera_height, d_gpu_pointBuffer, minHeight, maxHeight);
+		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, camera_height);
 		checkCudaErrors(cudaDeviceSynchronize());
 		cuda_rayTrace << <gridSize, blockSize >> > (colorBuffer);
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
-	__host__ void initializeDeviceVariables()
+	__host__ void initializeDeviceVariables(int grid_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_resolution)
 	{
-		cuda_initializeDeviceVariables << <1, 1 >> > ();
+		cuda_initializeDeviceVariables << <1, 1 >> > (grid_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_resolution);
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 

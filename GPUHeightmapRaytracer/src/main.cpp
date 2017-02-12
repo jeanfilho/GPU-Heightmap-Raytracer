@@ -63,9 +63,11 @@ GLuint bufferID;
 
 float maxHeight = -FLT_MAX, minHeight = FLT_MAX;
 
+float* h_gpu_pointBuffer;
 
 // jpeg image
-unsigned char *color_map = NULL;
+unsigned char *h_color_map = NULL;
+glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -77,8 +79,7 @@ std::chrono::duration<float> delta_time;
 //============================
 
 float* d_gpu_pointBuffer;
-float* h_gpu_pointBuffer;
-
+unsigned char *d_color_map = NULL;
 struct cudaGraphicsResource* cuda_pbo_resource;
 
 //============================
@@ -102,7 +103,8 @@ bool loadJPEG(std::string filename)
 	/*Open JPEG and start decompression*/
 	int row_stride;
 	FILE * infile;
-	if (fopen_s(&infile, ("../Data/" + filename).c_str(), "rb") != NULL) {
+	if (fopen_s(&infile, ("../Data/" + filename).c_str(), "rb") != NULL) 
+	{
 			fprintf(stderr, "can't open %s\n", filename.c_str());
 			return false;
 	}
@@ -143,8 +145,14 @@ bool loadJPEG(std::string filename)
 	jpeg_finish_decompress(&cinfo);
 	jpeg_destroy_decompress(&cinfo);
 
-	color_map = image_buffer;
+	h_color_map = image_buffer;
+	color_map_resolution = glm::ivec2(width, height);
 
+	/*Pass values to GPU*/
+	size_t count = sizeof(unsigned char) * 3 * width * height;
+	checkCudaErrors(cudaMalloc(&d_color_map, count));
+	checkCudaErrors(cudaMemcpy(d_color_map, h_color_map, count, cudaMemcpyHostToDevice));
+	
 	return true;
 }
 
@@ -242,7 +250,7 @@ void updateTexture()
 
 	//Call the wrapper method invoking the CUDA Kernel
 
-	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position.y, devPtr, d_gpu_pointBuffer, gpu_grid_res, minHeight, maxHeight);
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position.y, devPtr);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
@@ -457,11 +465,10 @@ void initialize()
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
 	checkCudaErrors(cudaMalloc(&d_gpu_pointBuffer, sizeof(float) * gpu_grid_res * gpu_grid_res));
 	h_gpu_pointBuffer = new float[gpu_grid_res * gpu_grid_res];
-
 	loadJPEG(color_map_file);
 	loadPointDataXYZ(point_cloud_file);
 	setupTexture();
-	CudaSpace::initializeDeviceVariables();
+	CudaSpace::initializeDeviceVariables(gpu_grid_res, texture_resolution, d_gpu_pointBuffer, d_color_map, color_map_resolution);
 }
 
 /* Free Resources */
@@ -469,9 +476,10 @@ void freeResourcers()
 {
 	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaFree(d_gpu_pointBuffer));
-	free(h_gpu_pointBuffer);
+	checkCudaErrors(cudaFree(d_color_map));
+	delete[](h_gpu_pointBuffer);
+	delete[](h_color_map);
 	CudaSpace::freeDeviceVariables();
-	if (color_map != NULL) free(color_map);
 }
 
 
@@ -486,7 +494,7 @@ int main(int argc, char** argv)
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
 	glutInitWindowSize(800, 600);
 	glutInitWindowPosition(100, 100);
-	glutCreateWindow("GPU Heightmap Raytracer 2k16");
+	glutCreateWindow("GPU Heightmap Raytracer 2k17");
 
 	// register glut call backs
 	glutKeyboardFunc(keyboardDown);
