@@ -30,6 +30,8 @@
 
 #include "jpeglib.h"
 
+#include <liblas/liblas.hpp>
+
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
 
