@@ -48,7 +48,6 @@
 std::string point_cloud_file = "autzen.las";
 std::string color_map_file = "autzen.jpg";
 
-
 glm::ivec2 texture_resolution(640, 480);
 glm::vec3
 	camera_position(0, 800, 0),
@@ -64,7 +63,7 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-int const point_buffer_res = 1024;
+glm::ivec2 const point_buffer_res = glm::ivec2(1024, 1024);
 
 // CPU-Side point grid
 float* cpu_point_grid;
@@ -167,6 +166,11 @@ void loadPointDataLAS(std::string filename)
 	/*Create input stream and associate it with .las file opened to read in binary mode*/
 	std::ifstream ifs;
 	ifs.open("../Data/" + filename, std::ios::in | std::ios::binary);
+	if(!ifs.is_open())
+	{
+		std::cout << "Error opening " + filename << std::endl;
+		exit(1);
+	}
 
 	/*Create a ReaderFactory and instantiate a new liblas::Reader using the stream.*/
 	liblas::ReaderFactory f;
@@ -174,6 +178,7 @@ void loadPointDataLAS(std::string filename)
 
 	/*After the reader has been created, you can access members of the Public Header Block*/
 	liblas::Header const& header = reader.GetHeader();
+	std::cout << "LAS File Loaded." << std::endl;
 	std::cout << "Compressed: " << (header.Compressed() == true) << std::endl;
 	std::cout << "Points count: " << header.GetPointRecordsCount() << std::endl;
 	std::cout << "MinX: " << header.GetMinX() << " MinY: " << header.GetMinY() << " MinZ: " << header.GetMinZ() << std::endl;
@@ -414,7 +419,7 @@ void setUpGPUPointBuffer()
 	//TODO: implement
 
 	//Send gpu point buffer to the gpu
-	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_res * point_buffer_res, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_point_buffer, cpu_point_grid, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y, cudaMemcpyHostToDevice));
 }
 
 //============================
@@ -550,12 +555,15 @@ void initialize()
 	glewInit();
 
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
-	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_res * point_buffer_res));
-	h_point_buffer = new float[point_buffer_res * point_buffer_res];
+
 	loadJPEG(color_map_file);
 	loadPointDataLAS(point_cloud_file);
 	setupTexture();
-	CudaSpace::initializeDeviceVariables(point_buffer_res, texture_resolution, d_point_buffer, d_color_map, color_map_resolution);
+
+	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y));
+	h_point_buffer = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y];
+	CudaSpace::initializeDeviceVariables(cpu_point_grid_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution);
+
 }
 
 /* Free Resources */

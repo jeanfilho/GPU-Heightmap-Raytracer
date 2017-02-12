@@ -8,22 +8,22 @@
 namespace CudaSpace
 {
 	
-	__device__ int grid_resolution;
 	__device__ float minimum_ray_inclination = 0.01f;
 	__device__ float cell_size[] = {1,2,4};
 	__device__ float *point_buffer;
 	__device__ unsigned char *color_map;
-	__device__ glm::ivec2 *color_map_resolution;
 	__device__ glm::vec3 *frame_dimension;
 	__device__ glm::vec3 *camera_forward;
 	__device__ glm::vec3 *grid_camera_position;
 	__device__ glm::ivec2 *texture_resolution;
+	__device__ glm::ivec2 *point_buffer_resolution;
+	__device__ glm::ivec2 *color_map_resolution;
 	__device__ glm::mat3x3 *pixel_to_grid_matrix;
 
 	/*
 	 * GLM::SIGN produces compile error in CUDA
 	 */
-	__device__ int sign(float input)
+	__device__ char sign(float input)
 	{
 		return input >= 0 ? 1 : -1;
 	}
@@ -74,26 +74,25 @@ namespace CudaSpace
 		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, 0);
 
 		/*Check if ray starts outside of the grid*/
-		if (posX >= grid_resolution || posX < 0 || posZ >= grid_resolution || posZ < 0)
+		if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0)
 			return -1;
 
 		/*Check if ray starts under the heightmap*/
-		height_index = posX * grid_resolution + posZ;
+		height_index = posX + point_buffer_resolution->x * posZ;
 		if (point_buffer[height_index] >= ray_origin.y)
 			return  -1;
 
 		/*Loop the DDA algorithm*/
 		while(true)
 		{
-
 			/*Check if ray intersects - Texel intersection from Dick, C., et al. (2009). GPU ray-casting for scalable terrain rendering. Proceedings of EUROGRAPHICS, Citeseer. Page */
 			if (ray_direction.y >= 0)
 				current_ray_position = ray_origin + ray_direction * (tMaxX < tMaxZ ? tDeltaX + tMaxX : tDeltaZ + tMaxZ);
 			else
 				current_ray_position = ray_origin + ray_direction * glm::min(tMaxX, tMaxZ);
-
-			height_index = posX + grid_resolution * posZ;
-			if(point_buffer[height_index] >= current_ray_position.y)
+						
+			height_index = posX + point_buffer_resolution->x * posZ;
+			if (point_buffer[height_index] >= current_ray_position.y)
 			{
 				return (posX + color_map_resolution->x * posZ) * 3;
 			}
@@ -110,9 +109,8 @@ namespace CudaSpace
 				posZ += stepZ;
 			}
 
-
 			/*Check if ray is outside of the grid*/
-			if (posX >= grid_resolution || posX < 0 || posZ >= grid_resolution || posZ < 0)
+			if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0 || current_ray_position.y < 0)
 			{
 				return -1;
 			}
@@ -184,7 +182,7 @@ namespace CudaSpace
 	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, float camera_height)
 	{
 		*frame_dimension = frame_dim;
-		*grid_camera_position = glm::vec3(grid_resolution / 2.0f, camera_height, grid_resolution / 2.0f);
+		*grid_camera_position = glm::vec3(point_buffer_resolution->x / 2.0f, camera_height, point_buffer_resolution->y / 2.0f);
 
 		/*Basis change matrix from view to grid space*/
 		glm::vec3 u, v, w;
@@ -194,15 +192,16 @@ namespace CudaSpace
 		*pixel_to_grid_matrix = (glm::mat3x3(u,v,w));
 
 	}
-	__global__ void cuda_initializeDeviceVariables(int grid_res, glm::ivec2 texture_res, float* d_gpu_pointBuffer, unsigned char *d_color_map, glm::ivec2 color_map_res)
+	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_res, glm::ivec2 texture_res, float* d_gpu_pointBuffer, unsigned char *d_color_map, glm::ivec2 color_map_res)
 	{
-		frame_dimension = static_cast<glm::vec3*>(malloc(sizeof(glm::vec3)));
-		grid_camera_position = static_cast<glm::vec3*>(malloc(sizeof(glm::vec3)));
-		texture_resolution = static_cast<glm::ivec2*>(malloc(sizeof(glm::ivec2)));
-		color_map_resolution = static_cast<glm::ivec2*>(malloc(sizeof(glm::ivec2)));
-		pixel_to_grid_matrix = static_cast<glm::mat3x3*>(malloc(sizeof(glm::mat3x3)));
+		frame_dimension = new glm::vec3();
+		grid_camera_position = new glm::vec3();
+		texture_resolution = new glm::ivec2();
+		color_map_resolution = new glm::ivec2();
+		point_buffer_resolution = new glm::ivec2();
+		pixel_to_grid_matrix = new glm::mat3x3();
 
-		grid_resolution = grid_res;
+		*point_buffer_resolution = point_buffer_res;
 		*texture_resolution = texture_res;	
 		point_buffer = d_gpu_pointBuffer;
 		color_map = d_color_map;
@@ -210,11 +209,12 @@ namespace CudaSpace
 	}
 	__global__ void cuda_freeDeviceVariables()
 	{
-		free(grid_camera_position);
-		free(texture_resolution);
-		free(frame_dimension);
-		free(pixel_to_grid_matrix);
-		free(color_map_resolution);
+		delete(grid_camera_position);
+		delete(texture_resolution);
+		delete(frame_dimension);
+		delete(pixel_to_grid_matrix);
+		delete(color_map_resolution);
+		delete(point_buffer_resolution);
 	}
 
 	/*
@@ -232,9 +232,9 @@ namespace CudaSpace
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
-	__host__ void initializeDeviceVariables(int grid_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_resolution)
+	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_resolution)
 	{
-		cuda_initializeDeviceVariables << <1, 1 >> > (grid_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_resolution);
+		cuda_initializeDeviceVariables << <1, 1 >> > (point_buffer_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_resolution);
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
