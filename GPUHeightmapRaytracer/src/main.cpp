@@ -50,8 +50,8 @@ std::string color_map_file = "autzen.jpg";
 
 glm::ivec2 texture_resolution(640, 480);
 glm::vec3
-	camera_position(0, 600, 0),
-	camera_forward = glm::normalize(glm::vec3(0, -.9, .9)),
+	camera_position(0, 300, 0),
+	camera_forward = glm::normalize(glm::vec3(0, -.9, 2)),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 
 GLuint textureID;
@@ -193,7 +193,6 @@ void loadPointDataLAS(std::string filename)
 	/*Allocate Grids*/
 	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX / cell_size.x), glm::floor(deltaY / cell_size.y));
 	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y]();
-	h_point_buffer = cpu_point_grid;
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y));
 	float maxDist = glm::sqrt(glm::pow(cell_size.x, 2) + glm::pow(cell_size.y,2));
 	
@@ -264,7 +263,6 @@ void loadPointDataXYZ(std::string filename)
 
 	cpu_point_grid_resolution = glm::ivec2(1025, 1025);
 	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y];
-	h_point_buffer = cpu_point_grid;
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y));
 
 	float x, y, z;
@@ -572,7 +570,6 @@ void freeResourcers()
 	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaFree(d_point_buffer));
 	checkCudaErrors(cudaFree(d_color_map));
-	delete[](h_point_buffer);
 	delete[](h_color_map);
 	delete[](cpu_point_grid);
 	CudaSpace::freeDeviceVariables();

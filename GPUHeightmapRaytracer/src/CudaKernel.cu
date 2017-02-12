@@ -20,6 +20,15 @@ namespace CudaSpace
 	__device__ glm::ivec2 *color_map_resolution;
 	__device__ glm::mat3x3 *pixel_to_grid_matrix;
 
+	/*Get a colormap index from a height map index*/
+	__device__ int getColorMapIndex(int posX, int posZ)
+	{
+		int colorX, colorZ;
+		colorX = float(posX) / point_buffer_resolution->x * color_map_resolution->x + 50;
+		colorZ = float(posZ) / point_buffer_resolution->y * color_map_resolution->y + 50;
+		return colorX + colorZ * color_map_resolution->x;
+	}
+
 	/*
 	 * GLM::SIGN produces compile error in CUDA
 	 */
@@ -94,7 +103,7 @@ namespace CudaSpace
 			height_index = posX + point_buffer_resolution->x * posZ;
 			if (point_buffer[height_index] >= current_ray_position.y)
 			{
-				return (posX + color_map_resolution->x * posZ) * 3;
+				return getColorMapIndex(posX, posZ) * 3;
 			}
 
 			/*Advance ray through the grid*/
@@ -182,7 +191,7 @@ namespace CudaSpace
 	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, float camera_height)
 	{
 		*frame_dimension = frame_dim;
-		*grid_camera_position = glm::vec3(point_buffer_resolution->x / 2.0f, camera_height, point_buffer_resolution->y / 2.0f);
+		*grid_camera_position = glm::vec3(point_buffer_resolution->x / 2.0f, camera_height, point_buffer_resolution->y / 3.0f);
 
 		/*Basis change matrix from view to grid space*/
 		glm::vec3 u, v, w;
