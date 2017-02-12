@@ -61,7 +61,7 @@ namespace CudaSpace
 	 *	Cast a ray through the grid {Amanatides, 1987 #22}
 	 *	ray_direction MUST be normalized
 	 */
-	__device__ glm::uvec3 castRay(glm::vec3& ray_origin, glm::vec3& ray_direction)
+	__device__ int castRay(glm::vec3& ray_origin, glm::vec3& ray_direction)
 	{
 		float tMaxX, tMaxZ, tDeltaX, tDeltaZ;
 		int posX, posZ;
@@ -75,12 +75,12 @@ namespace CudaSpace
 
 		/*Check if ray starts outside of the grid*/
 		if (posX >= grid_resolution || posX < 0 || posZ >= grid_resolution || posZ < 0)
-			return glm::zero<glm::uvec3>();
+			return -1;
 
 		/*Check if ray starts under the heightmap*/
 		height_index = posX * grid_resolution + posZ;
 		if (point_buffer[height_index] >= ray_origin.y)
-			return  glm::zero<glm::uvec3>();
+			return  -1;
 
 		/*Loop the DDA algorithm*/
 		while(true)
@@ -95,8 +95,7 @@ namespace CudaSpace
 			height_index = posX + grid_resolution * posZ;
 			if(point_buffer[height_index] >= current_ray_position.y)
 			{
-				int color_index = posX + color_map_resolution->x * posZ;
-				return glm::ivec3(color_map[color_index * 3], color_map[color_index * 3 + 1], color_map[color_index * 3 + 2]);
+				return (posX + color_map_resolution->x * posZ) * 3;
 			}
 
 			/*Advance ray through the grid*/
@@ -115,7 +114,7 @@ namespace CudaSpace
 			/*Check if ray is outside of the grid*/
 			if (posX >= grid_resolution || posX < 0 || posZ >= grid_resolution || posZ < 0)
 			{
-				return glm::zero<glm::uvec3>();
+				return -1;
 			}
 		}
 	}
@@ -137,7 +136,7 @@ namespace CudaSpace
 	/*
 	 * Start the ray tracing algorithm for each pixel
 	 */
-	__global__ void cuda_rayTrace(unsigned char* colorBuffer)
+	__global__ void cuda_rayTrace(unsigned char* color_buffer)
 	{
 		/*2D Grid and Block*/
 		/*int blockId = blockIdx.x + blockIdx.y * gridDim.x;
@@ -149,7 +148,7 @@ namespace CudaSpace
 		/*2D Grid and 1D Block*/
 		int threadId = blockIdx.y * gridDim.x + blockIdx.x;
 
-		glm::uvec3 color;
+		int color_index;
 		glm::vec3 ray_direction, ray_position;
 		glm::ivec2 pixel_position;
 
@@ -161,12 +160,21 @@ namespace CudaSpace
 
 		ray_position = ray_direction + *grid_camera_position;
 		ray_direction = glm::normalize(ray_direction);
-		color = castRay(ray_position, ray_direction);
+		color_index = castRay(ray_position, ray_direction);
 		
 		//GL_BGRA
-		colorBuffer[threadId * 3] = static_cast<unsigned char>(color.r);
-		colorBuffer[threadId * 3 + 1] = static_cast<unsigned char>(color.g);
-		colorBuffer[threadId * 3 + 2] = static_cast<unsigned char>(color.b);
+		if(color_index >= 0)
+		{
+			color_buffer[threadId * 3] = color_map[color_index];
+			color_buffer[threadId * 3 + 1] = color_map[color_index + 1];
+			color_buffer[threadId * 3 + 2] = color_map[color_index + 2];
+		}
+		else
+		{
+			color_buffer[threadId * 3] = 200;
+			color_buffer[threadId * 3 + 1] = 200;
+			color_buffer[threadId * 3 + 2] = 200;
+		}
 	}
 
 	/*

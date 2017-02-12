@@ -31,6 +31,8 @@
 #include "jpeglib.h"
 
 #include <liblas/liblas.hpp>
+#include <fstream>
+#include <iostream> 
 
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
@@ -43,31 +45,31 @@
 //		GLOBAL VARIABLES
 //============================
 
-std::string point_cloud_file = "data_1024";
+std::string point_cloud_file = "autzen.las";
 std::string color_map_file = "autzen.jpg";
 
-int const gpu_grid_res = 1025;
-int const cpu_grid_res = 1025;
 
 glm::ivec2 texture_resolution(640, 480);
-
-float cpu_pointBuffer[cpu_grid_res][cpu_grid_res];
-
 glm::vec3
 	camera_position(0, 800, 0),
-	camera_forward = glm::normalize(glm::vec3(-0.3, -.9, 0)),
+	camera_forward = glm::normalize(glm::vec3(0, -.9, .1)),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 
 GLuint textureID;
 GLuint bufferID;
 
-float maxHeight = -FLT_MAX, minHeight = FLT_MAX;
-
-float* h_gpu_pointBuffer;
-
-// jpeg image
+// JPEG image
 unsigned char *h_color_map = NULL;
 glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
+
+// Point buffer to be copied to GPU
+float* h_point_buffer;
+int const point_buffer_res = 1024;
+
+// CPU-Side point grid
+float* cpu_point_grid;
+glm::ivec2 cpu_point_grid_resolution = glm::zero<glm::ivec2>();
+glm::vec2 const cell_size = glm::vec2(1, 1);
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -78,7 +80,7 @@ std::chrono::duration<float> delta_time;
 //		CUDA VARIABLES
 //============================
 
-float* d_gpu_pointBuffer;
+float* d_point_buffer;
 unsigned char *d_color_map = NULL;
 struct cudaGraphicsResource* cuda_pbo_resource;
 
@@ -141,9 +143,9 @@ bool loadJPEG(std::string filename)
 	}
 
 	/*Finish decompression and release object*/
-	fclose(infile);
 	jpeg_finish_decompress(&cinfo);
 	jpeg_destroy_decompress(&cinfo);
+	fclose(infile);
 
 	h_color_map = image_buffer;
 	color_map_resolution = glm::ivec2(width, height);
@@ -156,6 +158,93 @@ bool loadJPEG(std::string filename)
 	return true;
 }
 
+/*
+ * Load points using libLas Library in LAS format
+ * Snippet from: http://www.liblas.org/tutorial/cpp.html
+ */
+void loadPointDataLAS(std::string filename)
+{
+	/*Create input stream and associate it with .las file opened to read in binary mode*/
+	std::ifstream ifs;
+	ifs.open("../Data/" + filename, std::ios::in | std::ios::binary);
+
+	/*Create a ReaderFactory and instantiate a new liblas::Reader using the stream.*/
+	liblas::ReaderFactory f;
+	liblas::Reader reader = f.CreateWithStream(ifs);
+
+	/*After the reader has been created, you can access members of the Public Header Block*/
+	liblas::Header const& header = reader.GetHeader();
+	std::cout << "Compressed: " << (header.Compressed() == true) << std::endl;
+	std::cout << "Points count: " << header.GetPointRecordsCount() << std::endl;
+	std::cout << "MinX: " << header.GetMinX() << " MinY: " << header.GetMinY() << " MinZ: " << header.GetMinZ() << std::endl;
+	std::cout << "MaxX: " << header.GetMaxX() << " MaxY: " << header.GetMaxY() << " MaxZ: " << header.GetMaxZ() << std::endl;
+	std::cout << "ScaleX: " << header.GetScaleX() << " ScaleY: " << header.GetScaleY() << " ScaleZ: " << header.GetScaleZ() << std::endl;
+	std::cout << "OffsetX: " << header.GetOffsetX() << " OffsetY: " << header.GetOffsetY() << " OffsetZ: " << header.GetOffsetZ() << std::endl;
+	float deltaX, deltaY;
+	deltaX = header.GetMaxX() - header.GetMinX();
+	deltaY = header.GetMaxY() - header.GetMinY();
+	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
+
+	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX), glm::floor(deltaY));
+	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y];
+
+	/*Iterate through point records and calculate the height contribution to each neighboring grid cell*/
+	while (reader.ReadNextPoint())
+	{
+		liblas::Point const& p = reader.GetPoint();
+		int x, y, index;
+		float alpha, fX, fY, fZ;
+
+		fX = p.GetX() - header.GetOffsetX();
+		fY = p.GetY() - header.GetOffsetY();
+		fZ = p.GetZ() - header.GetOffsetZ();
+		x = static_cast<int>(glm::floor(fX));
+		y = static_cast<int>(glm::floor(fY));
+
+		if(x >= 0 && x < cpu_point_grid_resolution.x)
+		{
+			//bottom left
+			if (y >= 0 && y < cpu_point_grid_resolution.y)
+			{
+				index = x + y * cpu_point_grid_resolution.x;
+				alpha = glm::sqrt(glm::pow(fX - x, 2) + glm::pow(fY - y, 2));
+				cpu_point_grid[index] = cpu_point_grid[index] * (1 - alpha) + fZ * alpha;
+			}
+
+			//top left
+			if (y + 1 >= 0 && y + 1 < cpu_point_grid_resolution.y)
+			{
+				index = x + (y + 1)*cpu_point_grid_resolution.x;
+				alpha = glm::sqrt(glm::pow(fX - x, 2) + glm::pow(cell_size.y - (fY - y), 2));
+				cpu_point_grid[index] = cpu_point_grid[index] * (1 - alpha) + fZ * alpha;
+			}
+		}
+
+		if (x + 1 >= 0 && x + 1 < cpu_point_grid_resolution.x)
+		{
+			//bottom right
+			if (y >= 0 && y < cpu_point_grid_resolution.y)
+			{
+				index = x + 1 + y * cpu_point_grid_resolution.x;
+				alpha = glm::sqrt(glm::pow(cell_size.x - (fX - x), 2) + glm::pow(fY - y, 2));
+				cpu_point_grid[index] = cpu_point_grid[index] * (1 - alpha) + fZ * alpha;
+			}
+
+			//top right
+			if (y + 1 >= 0 && y + 1 < cpu_point_grid_resolution.y)
+			{
+				index = x + 1 + (y + 1) * cpu_point_grid_resolution.x;
+				alpha = glm::sqrt(glm::pow(cell_size.x - (fX - x), 2) + glm::pow(cell_size.y - (fY - y), 2));
+				cpu_point_grid[index] = cpu_point_grid[index] * (1 - alpha) + fZ * alpha;
+			}
+		}
+
+	}
+
+	/*Close the file stream*/
+	ifs.close();
+}
+
 /*Load Point Data from disk -- TESTING PURPOSE ONLY*/
 void loadPointDataXYZ(std::string filename)
 {
@@ -163,6 +252,9 @@ void loadPointDataXYZ(std::string filename)
 
 	std::ifstream file("../Data/" + filename);
 	std::string line, data;
+
+	cpu_point_grid_resolution = glm::ivec2(1025, 1025);
+	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y];
 
 	float x, y, z;
 	while (std::getline(file, line) && !line.empty())
@@ -180,12 +272,7 @@ void loadPointDataXYZ(std::string filename)
 		data = line.substr(start, end - start);
 		y = (stof(data));
 
-		if (minHeight > y)
-			minHeight = y;
-		if (maxHeight < y)
-			maxHeight = y;
-
-		cpu_pointBuffer[int(glm::floor(x))][int(glm::floor(z))] = y;
+		cpu_point_grid[int(glm::floor(x)) + cpu_point_grid_resolution.y * int(glm::floor(z))] = y;
 	}
 	file.close();
 
@@ -327,7 +414,7 @@ void setUpGPUPointBuffer()
 	//TODO: implement
 
 	//Send gpu point buffer to the gpu
-	checkCudaErrors(cudaMemcpy(d_gpu_pointBuffer, cpu_pointBuffer, sizeof(float) * gpu_grid_res * gpu_grid_res, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_res * point_buffer_res, cudaMemcpyHostToDevice));
 }
 
 //============================
@@ -463,22 +550,23 @@ void initialize()
 	glewInit();
 
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
-	checkCudaErrors(cudaMalloc(&d_gpu_pointBuffer, sizeof(float) * gpu_grid_res * gpu_grid_res));
-	h_gpu_pointBuffer = new float[gpu_grid_res * gpu_grid_res];
+	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_res * point_buffer_res));
+	h_point_buffer = new float[point_buffer_res * point_buffer_res];
 	loadJPEG(color_map_file);
-	loadPointDataXYZ(point_cloud_file);
+	loadPointDataLAS(point_cloud_file);
 	setupTexture();
-	CudaSpace::initializeDeviceVariables(gpu_grid_res, texture_resolution, d_gpu_pointBuffer, d_color_map, color_map_resolution);
+	CudaSpace::initializeDeviceVariables(point_buffer_res, texture_resolution, d_point_buffer, d_color_map, color_map_resolution);
 }
 
 /* Free Resources */
 void freeResourcers()
 {
 	checkCudaErrors(cudaDeviceSynchronize());
-	checkCudaErrors(cudaFree(d_gpu_pointBuffer));
+	checkCudaErrors(cudaFree(d_point_buffer));
 	checkCudaErrors(cudaFree(d_color_map));
-	delete[](h_gpu_pointBuffer);
+	delete[](h_point_buffer);
 	delete[](h_color_map);
+	delete[](cpu_point_grid);
 	CudaSpace::freeDeviceVariables();
 }
 
