@@ -1,0 +1,13 @@
+diff a/GPUHeightmapRaytracer/src/CudaKernel.cu b/GPUHeightmapRaytracer/src/CudaKernel.cu	(rejected hunks)
+@@ -194,11 +194,6 @@
+ 	}
+ 	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_res, glm::ivec2 texture_res, float* d_gpu_pointBuffer, unsigned char *d_color_map, glm::ivec2 color_map_res)
+ 	{
+-		frame_dimension = static_cast<glm::vec3*>(malloc(sizeof(glm::vec3)));
+-		grid_camera_position = static_cast<glm::vec3*>(malloc(sizeof(glm::vec3)));
+-		texture_resolution = static_cast<glm::ivec2*>(malloc(sizeof(glm::ivec2)));
+-		color_map_resolution = static_cast<glm::ivec2*>(malloc(sizeof(glm::ivec2)));
+-		pixel_to_grid_matrix = static_cast<glm::mat3x3*>(malloc(sizeof(glm::mat3x3)));
+ 		frame_dimension = new glm::vec3();
+ 		grid_camera_position = new glm::vec3();
+ 		texture_resolution = new glm::ivec2();

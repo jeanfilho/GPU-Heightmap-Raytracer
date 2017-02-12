@@ -220,7 +220,7 @@ namespace CudaSpace
 	/*
 	 * Set grid and block dimensions, pass parameters to device and call kernels
 	 */
-	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, float camera_height, unsigned char* colorBuffer)
+	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, float camera_height, unsigned char* color_buffer)
 	{
 		//TODO: optimize Grid and Block sizes
 		dim3 gridSize(texture_resolution.x, texture_resolution.y);
@@ -228,13 +228,13 @@ namespace CudaSpace
 
 		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, camera_height);
 		checkCudaErrors(cudaDeviceSynchronize());
-		cuda_rayTrace << <gridSize, blockSize >> > (colorBuffer);
+		cuda_rayTrace << <gridSize, blockSize >> > (color_buffer);
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
-	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_resolution)
+	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_res)
 	{
-		cuda_initializeDeviceVariables << <1, 1 >> > (point_buffer_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_resolution);
+		cuda_initializeDeviceVariables << <1, 1 >> > (point_buffer_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_res);
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 

@@ -50,8 +50,8 @@ std::string color_map_file = "autzen.jpg";
 
 glm::ivec2 texture_resolution(640, 480);
 glm::vec3
-	camera_position(0, 800, 0),
-	camera_forward = glm::normalize(glm::vec3(0, -.9, .1)),
+	camera_position(0, 600, 0),
+	camera_forward = glm::normalize(glm::vec3(0, -.9, .9)),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 
 GLuint textureID;
@@ -190,18 +190,22 @@ void loadPointDataLAS(std::string filename)
 	deltaY = header.GetMaxY() - header.GetMinY();
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
 
-	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX), glm::floor(deltaY));
-	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y];
-
+	/*Allocate Grids*/
+	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX / cell_size.x), glm::floor(deltaY / cell_size.y));
+	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y]();
+	h_point_buffer = cpu_point_grid;
+	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y));
+	float maxDist = glm::sqrt(glm::pow(cell_size.x, 2) + glm::pow(cell_size.y,2));
+	
 	/*Iterate through point records and calculate the height contribution to each neighboring grid cell*/
 	while (reader.ReadNextPoint())
 	{
 		liblas::Point const& p = reader.GetPoint();
-		int x, y, index;
+		int x, y, index, point;
 		float alpha, fX, fY, fZ;
 
-		fX = p.GetX() - header.GetOffsetX();
-		fY = p.GetY() - header.GetOffsetY();
+		fX = (p.GetX() - header.GetOffsetX())/cell_size.x;
+		fY = (p.GetY() - header.GetOffsetY())/cell_size.y;
 		fZ = p.GetZ() - header.GetOffsetZ();
 		x = static_cast<int>(glm::floor(fX));
 		y = static_cast<int>(glm::floor(fY));
@@ -212,16 +216,16 @@ void loadPointDataLAS(std::string filename)
 			if (y >= 0 && y < cpu_point_grid_resolution.y)
 			{
 				index = x + y * cpu_point_grid_resolution.x;
-				alpha = glm::sqrt(glm::pow(fX - x, 2) + glm::pow(fY - y, 2));
-				cpu_point_grid[index] = cpu_point_grid[index] * (1 - alpha) + fZ * alpha;
+				alpha = glm::sqrt((glm::pow(fX - x, 2) + glm::pow(fY - y, 2)))/ maxDist;
+				cpu_point_grid[index] = cpu_point_grid[index] * alpha + fZ * (1 - alpha);
 			}
 
 			//top left
 			if (y + 1 >= 0 && y + 1 < cpu_point_grid_resolution.y)
 			{
 				index = x + (y + 1)*cpu_point_grid_resolution.x;
-				alpha = glm::sqrt(glm::pow(fX - x, 2) + glm::pow(cell_size.y - (fY - y), 2));
-				cpu_point_grid[index] = cpu_point_grid[index] * (1 - alpha) + fZ * alpha;
+				alpha = glm::sqrt((glm::pow(fX - x, 2) + glm::pow(cell_size.y - (fY - y), 2)))/ maxDist;
+				cpu_point_grid[index] = cpu_point_grid[index] * alpha + fZ * (1 - alpha);
 			}
 		}
 
@@ -231,16 +235,16 @@ void loadPointDataLAS(std::string filename)
 			if (y >= 0 && y < cpu_point_grid_resolution.y)
 			{
 				index = x + 1 + y * cpu_point_grid_resolution.x;
-				alpha = glm::sqrt(glm::pow(cell_size.x - (fX - x), 2) + glm::pow(fY - y, 2));
-				cpu_point_grid[index] = cpu_point_grid[index] * (1 - alpha) + fZ * alpha;
+				alpha = glm::sqrt((glm::pow(cell_size.x - (fX - x), 2) + glm::pow(fY - y, 2)))/ maxDist;
+				cpu_point_grid[index] = cpu_point_grid[index] * alpha + fZ * (1 - alpha);
 			}
 
 			//top right
 			if (y + 1 >= 0 && y + 1 < cpu_point_grid_resolution.y)
 			{
 				index = x + 1 + (y + 1) * cpu_point_grid_resolution.x;
-				alpha = glm::sqrt(glm::pow(cell_size.x - (fX - x), 2) + glm::pow(cell_size.y - (fY - y), 2));
-				cpu_point_grid[index] = cpu_point_grid[index] * (1 - alpha) + fZ * alpha;
+				alpha = glm::sqrt((glm::pow(cell_size.x - (fX - x), 2) + glm::pow(cell_size.y - (fY - y), 2)))/ maxDist;
+				cpu_point_grid[index] = cpu_point_grid[index] * alpha + fZ * (1 - alpha);
 			}
 		}
 
@@ -260,6 +264,8 @@ void loadPointDataXYZ(std::string filename)
 
 	cpu_point_grid_resolution = glm::ivec2(1025, 1025);
 	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y];
+	h_point_buffer = cpu_point_grid;
+	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y));
 
 	float x, y, z;
 	while (std::getline(file, line) && !line.empty())
@@ -341,7 +347,6 @@ void updateTexture()
 	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
 
 	//Call the wrapper method invoking the CUDA Kernel
-
 	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position.y, devPtr);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
@@ -555,15 +560,10 @@ void initialize()
 	glewInit();
 
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
-
 	loadJPEG(color_map_file);
 	loadPointDataLAS(point_cloud_file);
 	setupTexture();
-
-	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y));
-	h_point_buffer = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y];
 	CudaSpace::initializeDeviceVariables(cpu_point_grid_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution);
-
 }
 
 /* Free Resources */
