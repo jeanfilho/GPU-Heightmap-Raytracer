@@ -44,7 +44,7 @@
 //============================
 
 std::string point_cloud_file = "data_1024";
-std::string color_map_file = "data_1024";
+std::string color_map_file = "autzen.jpg";
 
 int const gpu_grid_res = 1025;
 int const cpu_grid_res = 1025;
@@ -102,7 +102,7 @@ bool loadJPEG(std::string filename)
 	/*Open JPEG and start decompression*/
 	int row_stride;
 	FILE * infile;
-	if (fopen_s(&infile, ("../Data/" + filename).c_str(), "rb") == NULL) {
+	if (fopen_s(&infile, ("../Data/" + filename).c_str(), "rb") != NULL) {
 			fprintf(stderr, "can't open %s\n", filename.c_str());
 			return false;
 	}
@@ -114,30 +114,28 @@ bool loadJPEG(std::string filename)
 	width = cinfo.output_width;
 	height = cinfo.output_height;
 	image_buffer = new unsigned char[width*height * 3];
-	it = image_buffer;
+	it = image_buffer + width * height * 3;
 
 	row_stride = width * cinfo.output_components;
 	pJpegBuffer = (*cinfo.mem->alloc_sarray)
 		(reinterpret_cast<j_common_ptr>(&cinfo), JPOOL_IMAGE, row_stride, 1);
 
-	/*Read data in JPEG*/
+	/*Read data in JPEG - scan from top to bottom*/
 	while (cinfo.output_scanline < cinfo.output_height)
 	{
 		jpeg_read_scanlines(&cinfo, pJpegBuffer, 1);
-		for (int x = 0; x < width; x++) {
+		it -= row_stride;
+		for (int x = 0; x < width; x++)
+		{
 			r = pJpegBuffer[0][cinfo.output_components * x];
-			if (cinfo.output_components > 2) {
-				g = pJpegBuffer[0][cinfo.output_components * x + 1];
-				b = pJpegBuffer[0][cinfo.output_components * x + 2];
-			}
-			else {
-				g = r;
-				b = r;
-			}
+			g = pJpegBuffer[0][cinfo.output_components * x + 1];
+			b = pJpegBuffer[0][cinfo.output_components * x + 2];
+
 			*(it++) = r;
 			*(it++) = g;
 			*(it++) = b;
 		}
+		it -= row_stride;
 	}
 
 	/*Finish decompression and release object*/
