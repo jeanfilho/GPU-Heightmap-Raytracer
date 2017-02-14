@@ -68,7 +68,7 @@ glm::ivec2 const point_buffer_res = glm::ivec2(1024, 1024);
 // CPU-Side point grid
 float* cpu_point_grid;
 glm::ivec2 cpu_point_grid_resolution = glm::zero<glm::ivec2>();
-glm::vec2 const cell_size = glm::vec2(1, 1);
+glm::vec2 cell_size;
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -189,6 +189,11 @@ void loadPointDataLAS(std::string filename)
 	deltaX = header.GetMaxX() - header.GetMinX();
 	deltaY = header.GetMaxY() - header.GetMinY();
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
+
+	/*Calculate area per point to set cell dimension*/
+	float point_area = (deltaX * deltaY) / header.GetPointRecordsCount();
+	cell_size.x = point_area;
+	cell_size.y = point_area;
 
 	/*Allocate Grids*/
 	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX / cell_size.x), glm::floor(deltaY / cell_size.y));
@@ -479,11 +484,12 @@ void keyboardDown(unsigned char key, int x, int y)
 {
 	switch (key)
 	{
-	case 'Q':
+	case 'e':
+		camera_position.y += 50;
+		break;
 	case 'q':
-	case 27:
-		// ESC
-		exit(0);
+		camera_position.y -= 50;
+		break;
 	default:;
 	}
 }
@@ -561,7 +567,7 @@ void initialize()
 	loadJPEG(color_map_file);
 	loadPointDataLAS(point_cloud_file);
 	setupTexture();
-	CudaSpace::initializeDeviceVariables(cpu_point_grid_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution);
+	CudaSpace::initializeDeviceVariables(cpu_point_grid_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size);
 }
 
 /* Free Resources */

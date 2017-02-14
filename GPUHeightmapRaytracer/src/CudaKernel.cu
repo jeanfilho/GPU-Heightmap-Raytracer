@@ -9,9 +9,9 @@ namespace CudaSpace
 {
 	
 	__device__ float minimum_ray_inclination = 0.01f;
-	__device__ float cell_size[] = {1,2,4};
 	__device__ float *point_buffer;
 	__device__ unsigned char *color_map;
+	__device__ glm::vec2 *cell_size;
 	__device__ glm::vec3 *frame_dimension;
 	__device__ glm::vec3 *camera_forward;
 	__device__ glm::vec3 *grid_camera_position;
@@ -42,7 +42,7 @@ namespace CudaSpace
 	* 
 	* Ray always starts in the grid
 	*/
-	__device__ void setUpParameters(float &tMax, float &tDelta, char &step, int &pos, float ray_origin, float ray_direction, int LOD)
+	__device__ void setUpParameters(float &tMax, float &tDelta, char &step, int &pos, float ray_origin, float ray_direction, int LOD, float cell_dimension)
 	{
 		/*Set starting voxel*/
 		pos = static_cast<int>(glm::floor(ray_origin));
@@ -61,8 +61,8 @@ namespace CudaSpace
 		}
 		else
 		{
-			tMax = ((glm::floor(ray_origin / cell_size[LOD]) + (ray_direction < 0 ? 0 : 1)) * cell_size[LOD] - ray_origin) / ray_direction;
-			tDelta = (ray_direction < 0 ? -1 : 1) * cell_size[LOD] / ray_direction;
+			tMax = ((glm::floor(ray_origin / cell_dimension) + (ray_direction < 0 ? 0 : 1)) * cell_dimension - ray_origin) / ray_direction;
+			tDelta = (ray_direction < 0 ? -1 : 1) * cell_dimension / ray_direction;
 		}
 	}
 
@@ -79,8 +79,8 @@ namespace CudaSpace
 		int height_index;
 		glm::dvec3 current_ray_position;
 
-		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, 0);
-		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, 0);
+		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, 0, cell_size->x);
+		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, 0, cell_size->y);
 
 		/*Check if ray starts outside of the grid*/
 		if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0)
@@ -201,7 +201,7 @@ namespace CudaSpace
 		*pixel_to_grid_matrix = (glm::mat3x3(u,v,w));
 
 	}
-	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_res, glm::ivec2 texture_res, float* d_gpu_pointBuffer, unsigned char *d_color_map, glm::ivec2 color_map_res)
+	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_res, glm::ivec2 texture_res, float* d_gpu_pointBuffer, unsigned char *d_color_map, glm::ivec2 color_map_res, glm::vec2 cell_siz)
 	{
 		frame_dimension = new glm::vec3();
 		grid_camera_position = new glm::vec3();
@@ -209,12 +209,14 @@ namespace CudaSpace
 		color_map_resolution = new glm::ivec2();
 		point_buffer_resolution = new glm::ivec2();
 		pixel_to_grid_matrix = new glm::mat3x3();
+		cell_size = new glm::vec2();
 
 		*point_buffer_resolution = point_buffer_res;
 		*texture_resolution = texture_res;	
 		point_buffer = d_gpu_pointBuffer;
 		color_map = d_color_map;
 		*color_map_resolution = color_map_res;
+		*cell_size = cell_siz;
 	}
 	__global__ void cuda_freeDeviceVariables()
 	{
@@ -224,6 +226,7 @@ namespace CudaSpace
 		delete(pixel_to_grid_matrix);
 		delete(color_map_resolution);
 		delete(point_buffer_resolution);
+		delete(cell_size);
 	}
 
 	/*
@@ -241,9 +244,9 @@ namespace CudaSpace
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
-	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_res)
+	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_res, glm::vec2& cell_size)
 	{
-		cuda_initializeDeviceVariables << <1, 1 >> > (point_buffer_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_res);
+		cuda_initializeDeviceVariables << <1, 1 >> > (point_buffer_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_res, cell_size);
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
