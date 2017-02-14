@@ -51,7 +51,7 @@ std::string color_map_file = "autzen.jpg";
 glm::ivec2 texture_resolution(640, 480);
 glm::vec3
 	camera_position(0, 300, 0),
-	camera_forward = glm::normalize(glm::vec3(0, -.9, 2)),
+	camera_forward = glm::normalize(glm::vec3(0, -.9, -2)),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 
 GLuint textureID;
@@ -191,8 +191,9 @@ void loadPointDataLAS(std::string filename)
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
 
 	/*Calculate area per point to set cell dimension*/
-	cell_size.x = 1;
-	cell_size.y = 1;
+	float point_area = deltaX * deltaY / header.GetPointRecordsCount();
+	cell_size.x = point_area;
+	cell_size.y = point_area;
 
 	/*Allocate Grids*/
 	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX / cell_size.x), glm::floor(deltaY / cell_size.y));
@@ -345,7 +346,7 @@ void updateTexture()
 	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
 
 	//Call the wrapper method invoking the CUDA Kernel
-	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position.y, devPtr);
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
@@ -477,13 +478,30 @@ void menu(int op)
 /* executed when a regular key is pressed */
 void keyboardDown(unsigned char key, int x, int y)
 {
+	float wasd_distance = 25;
+	float qe_distance = 50;
 	switch (key)
 	{
+	case 'p':
+	case '27':
+		exit(0);
 	case 'e':
-		camera_position.y += 50;
+		camera_position.y += qe_distance;
 		break;
 	case 'q':
-		camera_position.y -= 50;
+		camera_position.y -= qe_distance;
+		break;
+	case'a':
+		camera_position += wasd_distance * glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0)));
+		break;
+	case'd':
+		camera_position -= wasd_distance * glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0)));
+		break;
+	case 'w':
+		camera_position += wasd_distance * glm::vec3(camera_forward.x, 0, camera_forward.z);
+		break;
+	case 's':
+		camera_position -= wasd_distance * glm::vec3(camera_forward.x, 0, camera_forward.z);
 		break;
 	default:;
 	}

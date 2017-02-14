@@ -45,7 +45,7 @@ namespace CudaSpace
 	__device__ void setUpParameters(float &tMax, float &tDelta, char &step, int &pos, float ray_origin, float ray_direction, int LOD, float cell_dimension)
 	{
 		/*Set starting voxel*/
-		pos = static_cast<int>(glm::floor(ray_origin));
+		pos = static_cast<int>(glm::floor(ray_origin / cell_dimension));
 
 		/*Set whether position should increment or decrement based on ray direction*/
 		step = sign(ray_direction);
@@ -188,10 +188,10 @@ namespace CudaSpace
 	* Set device parameters
 	* TODO: replace with a single Memcpy call?
 	*/
-	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, float camera_height)
+	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos)
 	{
 		*frame_dimension = frame_dim;
-		*grid_camera_position = glm::vec3(point_buffer_resolution->x / 2.0f, camera_height, point_buffer_resolution->y / 3.0f);
+		*grid_camera_position = grid_camera_pos;
 
 		/*Basis change matrix from view to grid space*/
 		glm::vec3 u, v, w;
@@ -232,13 +232,13 @@ namespace CudaSpace
 	/*
 	 * Set grid and block dimensions, pass parameters to device and call kernels
 	 */
-	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, float camera_height, unsigned char* color_buffer)
+	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer)
 	{
 		//TODO: optimize Grid and Block sizes
 		dim3 gridSize(texture_resolution.x, texture_resolution.y);
 		dim3 blockSize(1);
 
-		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, camera_height);
+		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos);
 		checkCudaErrors(cudaDeviceSynchronize());
 		cuda_rayTrace << <gridSize, blockSize >> > (color_buffer);
 		checkCudaErrors(cudaDeviceSynchronize());
