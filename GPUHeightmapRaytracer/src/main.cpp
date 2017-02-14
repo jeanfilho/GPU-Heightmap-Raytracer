@@ -191,9 +191,8 @@ void loadPointDataLAS(std::string filename)
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
 
 	/*Calculate area per point to set cell dimension*/
-	float point_area = (deltaX * deltaY) / header.GetPointRecordsCount();
-	cell_size.x = point_area;
-	cell_size.y = point_area;
+	cell_size.x = 1;
+	cell_size.y = 1;
 
 	/*Allocate Grids*/
 	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX / cell_size.x), glm::floor(deltaY / cell_size.y));
@@ -206,7 +205,7 @@ void loadPointDataLAS(std::string filename)
 	{
 		liblas::Point const& p = reader.GetPoint();
 		int x, y, index, point;
-		float alpha, fX, fY, fZ;
+		float fX, fY, fZ;
 
 		fX = (p.GetX() - header.GetOffsetX())/cell_size.x;
 		fY = (p.GetY() - header.GetOffsetY())/cell_size.y;
@@ -220,16 +219,14 @@ void loadPointDataLAS(std::string filename)
 			if (y >= 0 && y < cpu_point_grid_resolution.y)
 			{
 				index = x + y * cpu_point_grid_resolution.x;
-				alpha = glm::sqrt((glm::pow(fX - x, 2) + glm::pow(fY - y, 2)))/ maxDist;
-				cpu_point_grid[index] = cpu_point_grid[index] * alpha + fZ * (1 - alpha);
+				cpu_point_grid[index] = fZ ;
 			}
 
 			//top left
 			if (y + 1 >= 0 && y + 1 < cpu_point_grid_resolution.y)
 			{
 				index = x + (y + 1)*cpu_point_grid_resolution.x;
-				alpha = glm::sqrt((glm::pow(fX - x, 2) + glm::pow(cell_size.y - (fY - y), 2)))/ maxDist;
-				cpu_point_grid[index] = cpu_point_grid[index] * alpha + fZ * (1 - alpha);
+				cpu_point_grid[index] = fZ;
 			}
 		}
 
@@ -239,16 +236,14 @@ void loadPointDataLAS(std::string filename)
 			if (y >= 0 && y < cpu_point_grid_resolution.y)
 			{
 				index = x + 1 + y * cpu_point_grid_resolution.x;
-				alpha = glm::sqrt((glm::pow(cell_size.x - (fX - x), 2) + glm::pow(fY - y, 2)))/ maxDist;
-				cpu_point_grid[index] = cpu_point_grid[index] * alpha + fZ * (1 - alpha);
+				cpu_point_grid[index] = fZ;
 			}
 
 			//top right
 			if (y + 1 >= 0 && y + 1 < cpu_point_grid_resolution.y)
 			{
 				index = x + 1 + (y + 1) * cpu_point_grid_resolution.x;
-				alpha = glm::sqrt((glm::pow(cell_size.x - (fX - x), 2) + glm::pow(cell_size.y - (fY - y), 2)))/ maxDist;
-				cpu_point_grid[index] = cpu_point_grid[index] * alpha + fZ * (1 - alpha);
+				cpu_point_grid[index] = fZ;
 			}
 		}
 
