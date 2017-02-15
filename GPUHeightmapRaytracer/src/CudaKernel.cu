@@ -45,7 +45,7 @@ namespace CudaSpace
 	__device__ void setUpParameters(float &tMax, float &tDelta, char &step, int &pos, float ray_origin, float ray_direction, int LOD, float cell_dimension)
 	{
 		/*Set starting voxel*/
-		pos = static_cast<int>(glm::floor(ray_origin / cell_dimension));
+		pos = static_cast<int>(floor(ray_origin / cell_dimension));
 
 		/*Set whether position should increment or decrement based on ray direction*/
 		step = sign(ray_direction);
@@ -54,14 +54,14 @@ namespace CudaSpace
 		 *Calculate the first intersection in the grid and
 		 *the distance between each axis intersection with the grid
 		 */
-		if (glm::abs(ray_direction) < 0.00001f)
+		if (abs(ray_direction) < 0.00001f)
 		{
 			tMax = FLT_MAX;
 			tDelta = 0;
 		}
 		else
 		{
-			tMax = ((glm::floor(ray_origin / cell_dimension) + (ray_direction < 0 ? 0 : 1)) * cell_dimension - ray_origin) / ray_direction;
+			tMax = ((floor(ray_origin / cell_dimension) + (ray_direction < 0 ? 0 : 1)) * cell_dimension - ray_origin) / ray_direction;
 			tDelta = (ray_direction < 0 ? -1 : 1) * cell_dimension / ray_direction;
 		}
 	}
@@ -75,9 +75,10 @@ namespace CudaSpace
 		float tMaxX, tMaxZ, tDeltaX, tDeltaZ;
 		int posX, posZ;
 		char stepX, stepZ;
+		int LOD = 1;
 
 		int height_index;
-		glm::dvec3 current_ray_position;
+		glm::vec3 current_ray_position;
 
 		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, 0, cell_size->x);
 		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, 0, cell_size->y);
@@ -109,13 +110,15 @@ namespace CudaSpace
 			/*Advance ray through the grid*/
 			if(tMaxX < tMaxZ)
 			{
-				tMaxX += tDeltaX;
-				posX += stepX;
+				if (tMaxX > 2000) LOD = 10; else if (tMaxX > 1000) LOD = 5; else LOD = 1;
+				tMaxX += tDeltaX * LOD;
+				posX += stepX * LOD;
 			}
 			else
 			{
-				tMaxZ += tDeltaZ;
-				posZ += stepZ;
+				if (tMaxZ > 2000) LOD = 10; else if (tMaxZ > 1000) LOD = 5; else LOD = 1;
+				tMaxZ += tDeltaZ * LOD;
+				posZ += stepZ * LOD;
 			}
 
 			/*Check if ray is outside of the grid*/
@@ -146,14 +149,14 @@ namespace CudaSpace
 	__global__ void cuda_rayTrace(unsigned char* color_buffer)
 	{
 		/*2D Grid and Block*/
-		/*int blockId = blockIdx.x + blockIdx.y * gridDim.x;
-		int threadId = blockId * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;*/
+		int blockId = blockIdx.x + blockIdx.y * gridDim.x;
+		int threadId = blockId * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
 
 		/*1D Grid and Block*/
 		/*int threadId = blockIdx.x *blockDim.x + threadIdx.x;*/
 
 		/*2D Grid and 1D Block*/
-		int threadId = blockIdx.y * gridDim.x + blockIdx.x;
+		//int threadId = blockIdx.y * gridDim.x + blockIdx.x;
 
 		int color_index;
 		glm::vec3 ray_direction, ray_position;
@@ -166,7 +169,7 @@ namespace CudaSpace
 		ray_direction = (*pixel_to_grid_matrix * viewToGridSpace(pixel_position));
 
 		ray_position = ray_direction + *grid_camera_position;
-		ray_direction = glm::normalize(ray_direction);
+		ray_direction = normalize(ray_direction);
 		color_index = castRay(ray_position, ray_direction);
 		
 		//GL_BGRA
@@ -235,8 +238,9 @@ namespace CudaSpace
 	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer)
 	{
 		//TODO: optimize Grid and Block sizes
-		dim3 gridSize(texture_resolution.x, texture_resolution.y);
-		dim3 blockSize(1);
+		int blockX = 640, blockY = 1;
+		dim3 gridSize(texture_resolution.x / blockX, texture_resolution.y / blockY,1);
+		dim3 blockSize(blockX, blockY,1);
 
 		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos);
 		checkCudaErrors(cudaDeviceSynchronize());

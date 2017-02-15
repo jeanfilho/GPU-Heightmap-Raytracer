@@ -75,6 +75,14 @@ std::chrono::system_clock sys_clock;
 std::chrono::time_point<std::chrono::system_clock> last_frame, current_frame;
 std::chrono::duration<float> delta_time;
 
+//movement
+float movement_rht = 0;
+float movement_fwd = 0;
+float movement_up = 0;
+float right_movement = 0;
+float wasd_movement_distance = 250;
+float qe_movement_distance = 500;
+
 //============================
 //		CUDA VARIABLES
 //============================
@@ -478,30 +486,51 @@ void menu(int op)
 /* executed when a regular key is pressed */
 void keyboardDown(unsigned char key, int x, int y)
 {
-	float wasd_distance = 25;
-	float qe_distance = 50;
 	switch (key)
 	{
 	case 'p':
 	case '27':
 		exit(0);
 	case 'e':
-		camera_position.y += qe_distance;
+		movement_up = qe_movement_distance;
 		break;
 	case 'q':
-		camera_position.y -= qe_distance;
+		movement_up = -qe_movement_distance;
 		break;
 	case'a':
-		camera_position += wasd_distance * glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0)));
+		movement_rht = wasd_movement_distance;
 		break;
 	case'd':
-		camera_position -= wasd_distance * glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0)));
+		movement_rht = -wasd_movement_distance;
 		break;
 	case 'w':
-		camera_position += wasd_distance * glm::vec3(camera_forward.x, 0, camera_forward.z);
+		movement_fwd = wasd_movement_distance;
 		break;
 	case 's':
-		camera_position -= wasd_distance * glm::vec3(camera_forward.x, 0, camera_forward.z);
+		movement_fwd = -wasd_movement_distance;
+		break;
+	default:;
+	}
+}
+
+void keyboardUp(unsigned char key, int x, int y)
+{
+	switch (key)
+	{
+	case 'p':
+	case '27':
+		exit(0);
+	case 'e':
+	case 'q':
+		movement_up = 0;
+		break;
+	case 'a':
+	case 'd':
+		movement_rht = 0;
+		break;
+	case 'w':
+	case 's':
+		movement_fwd = 0;
 		break;
 	default:;
 	}
@@ -537,6 +566,9 @@ void draw()
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
+
+	/*move the camera*/
+	camera_position += delta_time.count() * (glm::vec3(0, movement_up,0) + glm::vec3(camera_forward.x, 0, camera_forward.z) * movement_fwd + glm::normalize(glm::cross(camera_forward, glm::vec3(0,1,0))) * movement_rht);
 
 	/* render the scene here */
 	setUpGPUPointBuffer();
@@ -610,6 +642,7 @@ int main(int argc, char** argv)
 
 	// register glut call backs
 	glutKeyboardFunc(keyboardDown);
+	glutKeyboardUpFunc(keyboardUp);
 	glutMouseFunc(mouseClick);
 	glutMotionFunc(mouseMotion);
 	glutReshapeFunc(reshape);
