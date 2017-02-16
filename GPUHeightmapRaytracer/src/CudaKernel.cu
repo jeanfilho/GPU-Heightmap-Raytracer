@@ -9,6 +9,7 @@ namespace CudaSpace
 {
 	
 	__device__ float minimum_ray_inclination = 0.01f;
+	__device__ float max_height = 0;
 	__device__ float *point_buffer;
 	__device__ unsigned char *color_map;
 	__device__ glm::vec2 *cell_size;
@@ -121,8 +122,10 @@ namespace CudaSpace
 				posZ += stepZ * LOD;
 			}
 
-			/*Check if ray is outside of the grid*/
-			if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0 || current_ray_position.y < 0)
+			/*Check if ray is outside of the grid and going up after max_height is reached*/
+			if (posX >= point_buffer_resolution->x || posX < 0 ||
+				posZ >= point_buffer_resolution->y || posZ < 0 ||
+				current_ray_position.y < 0 || current_ray_position.y > max_height && ray_direction.y >= 0)
 			{
 				return -1;
 			}
@@ -151,13 +154,7 @@ namespace CudaSpace
 		/*2D Grid and Block*/
 		int blockId = blockIdx.x + blockIdx.y * gridDim.x;
 		int threadId = blockId * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
-
-		/*1D Grid and Block*/
-		/*int threadId = blockIdx.x *blockDim.x + threadIdx.x;*/
-
-		/*2D Grid and 1D Block*/
-		//int threadId = blockIdx.y * gridDim.x + blockIdx.x;
-
+		
 		int color_index;
 		glm::vec3 ray_direction, ray_position;
 		glm::ivec2 pixel_position;
@@ -191,10 +188,11 @@ namespace CudaSpace
 	* Set device parameters
 	* TODO: replace with a single Memcpy call?
 	*/
-	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos)
+	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos, float max_h)
 	{
 		*frame_dimension = frame_dim;
-		*grid_camera_position = grid_camera_pos;
+		grid_camera_position->y = grid_camera_pos.y;
+		max_height = max_h;
 
 		/*Basis change matrix from view to grid space*/
 		glm::vec3 u, v, w;
@@ -207,12 +205,12 @@ namespace CudaSpace
 	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_res, glm::ivec2 texture_res, float* d_gpu_pointBuffer, unsigned char *d_color_map, glm::ivec2 color_map_res, glm::vec2 cell_siz)
 	{
 		frame_dimension = new glm::vec3();
-		grid_camera_position = new glm::vec3();
 		texture_resolution = new glm::ivec2();
 		color_map_resolution = new glm::ivec2();
 		point_buffer_resolution = new glm::ivec2();
 		pixel_to_grid_matrix = new glm::mat3x3();
 		cell_size = new glm::vec2();
+		grid_camera_position = new glm::vec3(point_buffer_res.x / 2.f * cell_siz.x, 0, point_buffer_res.y / 2.f * cell_siz.y);
 
 		*point_buffer_resolution = point_buffer_res;
 		*texture_resolution = texture_res;	
@@ -235,14 +233,14 @@ namespace CudaSpace
 	/*
 	 * Set grid and block dimensions, pass parameters to device and call kernels
 	 */
-	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer)
+	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer, float max_height)
 	{
 		//TODO: optimize Grid and Block sizes
 		int blockX = 640, blockY = 1;
 		dim3 gridSize(texture_resolution.x / blockX, texture_resolution.y / blockY,1);
 		dim3 blockSize(blockX, blockY,1);
 
-		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos);
+		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos, max_height);
 		checkCudaErrors(cudaDeviceSynchronize());
 		cuda_rayTrace << <gridSize, blockSize >> > (color_buffer);
 		checkCudaErrors(cudaDeviceSynchronize());

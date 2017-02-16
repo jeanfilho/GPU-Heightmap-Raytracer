@@ -27,12 +27,11 @@
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 #include <glm/glm.hpp>
+#include <glm/gtx/rotate_vector.hpp>
 
 #include "jpeglib.h"
 
 #include <liblas/liblas.hpp>
-#include <fstream>
-#include <iostream> 
 
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
@@ -45,13 +44,15 @@
 //		GLOBAL VARIABLES
 //============================
 
-std::string point_cloud_file = "autzen.las";
+// Filenames
+std::string point_cloud_file = "points.las";
 std::string color_map_file = "autzen.jpg";
 
+// Camera related
 glm::ivec2 texture_resolution(640, 480);
 glm::vec3
-	camera_position(0, 300, 0),
-	camera_forward = glm::normalize(glm::vec3(0, -.9, -2)),
+	camera_position(1500, 200, 0),
+	camera_forward = glm::normalize(glm::vec3(5, -.9, 0)),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 
 GLuint textureID;
@@ -63,25 +64,33 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-glm::ivec2 const point_buffer_res = glm::ivec2(1024, 1024);
+glm::ivec2 point_buffer_resolution = glm::ivec2(1024 * 5, 1024 * 5);
 
 // CPU-Side point grid
 float* cpu_point_grid;
 glm::ivec2 cpu_point_grid_resolution = glm::zero<glm::ivec2>();
 glm::vec2 cell_size;
+float max_height = 0;
+float height_tolerance = 50;
 
 // clock
 std::chrono::system_clock sys_clock;
 std::chrono::time_point<std::chrono::system_clock> last_frame, current_frame;
 std::chrono::duration<float> delta_time;
 
-//movement
+// movement
 float movement_rht = 0;
 float movement_fwd = 0;
 float movement_up = 0;
 float right_movement = 0;
 float wasd_movement_distance = 250;
 float qe_movement_distance = 500;
+
+// rotation
+float rotation_up = 0;
+float rotation_right = 0;
+float ik_rotation_angle = 1.f;
+float jl_rotation_angle = 1.f;
 
 //============================
 //		CUDA VARIABLES
@@ -98,7 +107,6 @@ struct cudaGraphicsResource* cuda_pbo_resource;
 /*Loads JPEG image from disk*/
 bool loadJPEG(std::string filename)
 {
-
 	unsigned char *image_buffer, *it;
 	unsigned char r, g, b;
 	struct jpeg_decompress_struct cinfo;
@@ -193,7 +201,7 @@ void loadPointDataLAS(std::string filename)
 	std::cout << "MaxX: " << header.GetMaxX() << " MaxY: " << header.GetMaxY() << " MaxZ: " << header.GetMaxZ() << std::endl;
 	std::cout << "ScaleX: " << header.GetScaleX() << " ScaleY: " << header.GetScaleY() << " ScaleZ: " << header.GetScaleZ() << std::endl;
 	std::cout << "OffsetX: " << header.GetOffsetX() << " OffsetY: " << header.GetOffsetY() << " OffsetZ: " << header.GetOffsetZ() << std::endl;
-	float deltaX, deltaY;
+	double deltaX, deltaY;
 	deltaX = header.GetMaxX() - header.GetMinX();
 	deltaY = header.GetMaxY() - header.GetMinY();
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
@@ -204,97 +212,41 @@ void loadPointDataLAS(std::string filename)
 	cell_size.y = point_area;
 
 	/*Allocate Grids*/
-	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX / cell_size.x), glm::floor(deltaY / cell_size.y));
+	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX / cell_size.x) + 1, glm::floor(deltaY / cell_size.y) + 1);
 	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y]();
-	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y));
-	float maxDist = glm::sqrt(glm::pow(cell_size.x, 2) + glm::pow(cell_size.y,2));
-	
+	std::cout << "Grid Resolution: " << cpu_point_grid_resolution.x << " " <<cpu_point_grid_resolution.y << std::endl;
+
+	/*Reduce size of gpu grid if the cpu grid is too small*/
+	if (point_buffer_resolution.x > cpu_point_grid_resolution.x)
+		point_buffer_resolution.x = cpu_point_grid_resolution.x;
+	if (point_buffer_resolution.y > cpu_point_grid_resolution.y)
+		point_buffer_resolution.y = cpu_point_grid_resolution.y;
+
 	/*Iterate through point records and calculate the height contribution to each neighboring grid cell*/
 	while (reader.ReadNextPoint())
 	{
 		liblas::Point const& p = reader.GetPoint();
-		int x, y, index, point;
+		int x, y, index;
 		float fX, fY, fZ;
 
-		fX = (p.GetX() - header.GetOffsetX())/cell_size.x;
-		fY = (p.GetY() - header.GetOffsetY())/cell_size.y;
-		fZ = p.GetZ() - header.GetOffsetZ();
-		x = static_cast<int>(glm::floor(fX));
-		y = static_cast<int>(glm::floor(fY));
+		fX = p.GetX() - header.GetMinX();
+		fY = p.GetY() - header.GetMinY();
+		fZ = p.GetZ() - header.GetMinZ();
+		x = static_cast<int>(glm::floor(fX / cell_size.x));
+		y = static_cast<int>(glm::floor(fY / cell_size.y));
 
-		if(x >= 0 && x < cpu_point_grid_resolution.x)
+		index = x + y * cpu_point_grid_resolution.x;
+		cpu_point_grid[index] = fZ;
+
+		if (max_height < fZ && fZ - max_height < height_tolerance)
 		{
-			//bottom left
-			if (y >= 0 && y < cpu_point_grid_resolution.y)
-			{
-				index = x + y * cpu_point_grid_resolution.x;
-				cpu_point_grid[index] = fZ ;
-			}
-
-			//top left
-			if (y + 1 >= 0 && y + 1 < cpu_point_grid_resolution.y)
-			{
-				index = x + (y + 1)*cpu_point_grid_resolution.x;
-				cpu_point_grid[index] = fZ;
-			}
+			max_height = fZ;
+			std::cout << "Max height: " << max_height << std::endl;
 		}
-
-		if (x + 1 >= 0 && x + 1 < cpu_point_grid_resolution.x)
-		{
-			//bottom right
-			if (y >= 0 && y < cpu_point_grid_resolution.y)
-			{
-				index = x + 1 + y * cpu_point_grid_resolution.x;
-				cpu_point_grid[index] = fZ;
-			}
-
-			//top right
-			if (y + 1 >= 0 && y + 1 < cpu_point_grid_resolution.y)
-			{
-				index = x + 1 + (y + 1) * cpu_point_grid_resolution.x;
-				cpu_point_grid[index] = fZ;
-			}
-		}
-
 	}
 
 	/*Close the file stream*/
 	ifs.close();
-}
-
-/*Load Point Data from disk -- TESTING PURPOSE ONLY*/
-void loadPointDataXYZ(std::string filename)
-{
-	std::cout << "Loading points... ";
-
-	std::ifstream file("../Data/" + filename);
-	std::string line, data;
-
-	cpu_point_grid_resolution = glm::ivec2(1025, 1025);
-	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y];
-	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y));
-
-	float x, y, z;
-	while (std::getline(file, line) && !line.empty())
-	{
-		size_t start = 0, end = line.find(" ");
-		data = line.substr(start, end - start);
-		x = (stof(data));
-
-		start = end + 1;
-		end = line.find(" ", start + 1);
-		data = line.substr(start, end - start);
-		z = (stof(data));
-
-		start = end + 1;
-		data = line.substr(start, end - start);
-		y = (stof(data));
-
-		cpu_point_grid[int(glm::floor(x)) + cpu_point_grid_resolution.y * int(glm::floor(z))] = y;
-	}
-	file.close();
-
-	std::cout << "done" << std::endl;
 }
 
 /*Snippet from http://www.nvidia.com/content/GTC/documents/1055_GTC09.pdf
@@ -354,7 +306,7 @@ void updateTexture()
 	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
 
 	//Call the wrapper method invoking the CUDA Kernel
-	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr);
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
@@ -412,6 +364,37 @@ void renderTexture()
 	glMatrixMode(GL_MODELVIEW);
 }
 
+/*Handle the camera movement*/
+void moveCamera()
+{
+	camera_position += delta_time.count() * (glm::vec3(0, movement_up, 0) + glm::normalize(glm::vec3(camera_forward.x, 0, camera_forward.z)) * movement_fwd + glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0))) * movement_rht);
+	
+	if (camera_position.x < (point_buffer_resolution.x / 2) * cell_size.x)
+		camera_position.x = (point_buffer_resolution.x / 2) * cell_size.x;
+	if (camera_position.x >= (cpu_point_grid_resolution.x - point_buffer_resolution.x / 2) * cell_size.x)
+		camera_position.x =  (cpu_point_grid_resolution.x - point_buffer_resolution.x / 2) * cell_size.x;
+
+	if (camera_position.z < (point_buffer_resolution.y / 2) * cell_size.y)
+		camera_position.z = (point_buffer_resolution.y / 2) * cell_size.y ;
+	if (camera_position.z >= (cpu_point_grid_resolution.y - point_buffer_resolution.y / 2) * cell_size.y)
+		camera_position.z =  (cpu_point_grid_resolution.y - point_buffer_resolution.y / 2) * cell_size.y;
+
+	std::cout << camera_position.x << " " << camera_position.z << std::endl;
+
+	if (camera_position.y < 0)
+		camera_position.y = 0;
+	if (camera_position.y >= max_height * 2)
+		camera_position.y = max_height * 2;
+
+}
+
+void rotateCamera()
+{
+
+	camera_forward = glm::rotate(camera_forward, rotation_up * delta_time.count(), glm::vec3(0, 1, 0));
+	camera_forward = glm::rotate(camera_forward, rotation_right * delta_time.count(), glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0))));
+}
+
 //============================
 //		THREAD FUNCTIONS
 //============================
@@ -428,17 +411,24 @@ void loadPointsFromDisk()
  */
 void setUpGPUPointBuffer()
 {
-	//TODO: implement
+	/*Copies a portion of the grid to raytrace in the gpu*/
+	int x, y;
+	x = int(floor(camera_position.x / cell_size.x)) - point_buffer_resolution.x / 2;
+	y = int(floor(camera_position.z / cell_size.y)) - point_buffer_resolution.y / 2;
+	int size = sizeof(float) * point_buffer_resolution.x;
+	for(int i = 0; i < point_buffer_resolution.y; i++)
+	{
+		int offset =  x + (y + i) * cpu_point_grid_resolution.x;
+		memcpy(h_point_buffer + i * point_buffer_resolution.x, cpu_point_grid + offset, size);
+	}
 
-	//Send gpu point buffer to the gpu
-	checkCudaErrors(cudaMemcpy(d_point_buffer, cpu_point_grid, sizeof(float) * cpu_point_grid_resolution.x * cpu_point_grid_resolution.y, cudaMemcpyHostToDevice));
+	/*Send gpu point buffer to the gpu*/
+	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
 }
 
 //============================
 //		GLUT FUNCTIONS
 //============================
-
-
 /*Displays FPS from http://stackoverflow.com/questions/20866508/using-glut-to-simply-print-text*/
 void drawFPS()
 {
@@ -491,6 +481,7 @@ void keyboardDown(unsigned char key, int x, int y)
 	case 'p':
 	case '27':
 		exit(0);
+	/*movement*/
 	case 'e':
 		movement_up = qe_movement_distance;
 		break;
@@ -508,6 +499,20 @@ void keyboardDown(unsigned char key, int x, int y)
 		break;
 	case 's':
 		movement_fwd = -wasd_movement_distance;
+		break;
+
+	/*rotation*/
+	case 'i':
+		rotation_right = ik_rotation_angle;
+		break;
+	case 'k':
+		rotation_right = -ik_rotation_angle;
+		break;
+	case 'j':
+		rotation_up = -jl_rotation_angle;
+		break;
+	case 'l':
+		rotation_up = jl_rotation_angle;
 		break;
 	default:;
 	}
@@ -532,6 +537,13 @@ void keyboardUp(unsigned char key, int x, int y)
 	case 's':
 		movement_fwd = 0;
 		break;
+	case 'i':
+	case 'k':
+		rotation_right = 0;
+		break;
+	case 'j':
+	case 'l':
+		rotation_up = 0;
 	default:;
 	}
 }
@@ -567,8 +579,8 @@ void draw()
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 
-	/*move the camera*/
-	camera_position += delta_time.count() * (glm::vec3(0, movement_up,0) + glm::vec3(camera_forward.x, 0, camera_forward.z) * movement_fwd + glm::normalize(glm::cross(camera_forward, glm::vec3(0,1,0))) * movement_rht);
+	moveCamera();
+	rotateCamera();
 
 	/* render the scene here */
 	setUpGPUPointBuffer();
@@ -612,7 +624,9 @@ void initialize()
 	loadJPEG(color_map_file);
 	loadPointDataLAS(point_cloud_file);
 	setupTexture();
-	CudaSpace::initializeDeviceVariables(cpu_point_grid_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size);
+	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y];
+	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y));
+	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size);
 }
 
 /* Free Resources */
@@ -623,6 +637,7 @@ void freeResourcers()
 	checkCudaErrors(cudaFree(d_color_map));
 	delete[](h_color_map);
 	delete[](cpu_point_grid);
+	delete[](h_point_buffer);
 	CudaSpace::freeDeviceVariables();
 }
 
