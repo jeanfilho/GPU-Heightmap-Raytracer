@@ -25,8 +25,8 @@ namespace CudaSpace
 	__device__ int getColorMapIndex(int posX, int posZ)
 	{
 		int colorX, colorZ;
-		colorX = float(posX) / point_buffer_resolution->x * color_map_resolution->x + 50;
-		colorZ = float(posZ) / point_buffer_resolution->y * color_map_resolution->y + 50;
+		colorX = float(posX) / point_buffer_resolution->x * color_map_resolution->x;
+		colorZ = float(posZ) / point_buffer_resolution->y * color_map_resolution->y;
 		return colorX + colorZ * color_map_resolution->x;
 	}
 

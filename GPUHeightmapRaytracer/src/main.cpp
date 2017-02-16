@@ -364,6 +364,26 @@ void renderTexture()
 	glMatrixMode(GL_MODELVIEW);
 }
 
+/*
+* Set up CPU-Side buffer that is going to be transferred over to the GPU
+*/
+void copyPointBuffer()
+{
+	/*Copies a portion of the grid to raytrace in the gpu*/
+	int x, y;
+	x = int(floor(camera_position.x / cell_size.x)) - point_buffer_resolution.x / 2;
+	y = int(floor(camera_position.z / cell_size.y)) - point_buffer_resolution.y / 2;
+	int size = sizeof(float) * point_buffer_resolution.x;
+	for (int i = 0; i < point_buffer_resolution.y; i++)
+	{
+		int offset = x + (y + i) * cpu_point_grid_resolution.x;
+		memcpy(h_point_buffer + i * point_buffer_resolution.x, cpu_point_grid + offset, size);
+	}
+
+	/*Send gpu point buffer to the gpu*/
+	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
+}
+
 /*Handle the camera movement*/
 void moveCamera()
 {
@@ -406,25 +426,6 @@ void loadPointsFromDisk()
 	//TODO: implement
 }
 
-/*
- * Set up CPU-Side buffer that is going to be transferred over to the GPU
- */
-void setUpGPUPointBuffer()
-{
-	/*Copies a portion of the grid to raytrace in the gpu*/
-	int x, y;
-	x = int(floor(camera_position.x / cell_size.x)) - point_buffer_resolution.x / 2;
-	y = int(floor(camera_position.z / cell_size.y)) - point_buffer_resolution.y / 2;
-	int size = sizeof(float) * point_buffer_resolution.x;
-	for(int i = 0; i < point_buffer_resolution.y; i++)
-	{
-		int offset =  x + (y + i) * cpu_point_grid_resolution.x;
-		memcpy(h_point_buffer + i * point_buffer_resolution.x, cpu_point_grid + offset, size);
-	}
-
-	/*Send gpu point buffer to the gpu*/
-	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
-}
 
 //============================
 //		GLUT FUNCTIONS
@@ -583,7 +584,7 @@ void draw()
 	rotateCamera();
 
 	/* render the scene here */
-	setUpGPUPointBuffer();
+	copyPointBuffer();
 	updateTexture();
 	renderTexture();
 
