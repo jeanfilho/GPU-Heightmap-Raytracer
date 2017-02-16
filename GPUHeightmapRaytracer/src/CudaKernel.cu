@@ -7,11 +7,12 @@
 
 namespace CudaSpace
 {
-	
-	__device__ float minimum_ray_inclination = 0.01f;
 	__device__ float max_height = 0;
 	__device__ float *point_buffer;
 	__device__ unsigned char *color_map;
+	__device__ int LOD_MAX = 2;
+	__device__ int LOD_jump_cells[] = {1, 2, 4};
+	__device__ float LOD_distance[] = {0, 1000, 2000};
 	__device__ glm::vec2 *cell_size;
 	__device__ glm::vec3 *frame_dimension;
 	__device__ glm::vec3 *camera_forward;
@@ -25,8 +26,8 @@ namespace CudaSpace
 	__device__ int getColorMapIndex(int posX, int posZ)
 	{
 		int colorX, colorZ;
-		colorX = float(posX) / point_buffer_resolution->x * color_map_resolution->x;
-		colorZ = float(posZ) / point_buffer_resolution->y * color_map_resolution->y;
+		colorX = float(posX) / float(point_buffer_resolution->x) * color_map_resolution->x;
+		colorZ = float(posZ) / float(point_buffer_resolution->y) * color_map_resolution->y;
 		return colorX + colorZ * color_map_resolution->x;
 	}
 
@@ -43,7 +44,7 @@ namespace CudaSpace
 	* 
 	* Ray always starts in the grid
 	*/
-	__device__ void setUpParameters(float &tMax, float &tDelta, char &step, int &pos, float ray_origin, float ray_direction, int LOD, float cell_dimension)
+	__device__ void setUpParameters(float &tMax, float &tDelta, char &step, int &pos, float ray_origin, float ray_direction, float cell_dimension)
 	{
 		/*Set starting voxel*/
 		pos = static_cast<int>(floor(ray_origin / cell_dimension));
@@ -76,13 +77,13 @@ namespace CudaSpace
 		float tMaxX, tMaxZ, tDeltaX, tDeltaZ;
 		int posX, posZ;
 		char stepX, stepZ;
-		int LOD = 1;
+		int LOD = 0;
 
 		int height_index;
 		glm::vec3 current_ray_position;
 
-		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, 0, cell_size->x);
-		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, 0, cell_size->y);
+		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, cell_size->x);
+		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, cell_size->y);
 
 		/*Check if ray starts outside of the grid*/
 		if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0)
@@ -185,8 +186,23 @@ namespace CudaSpace
 	}
 
 	/*
+	 * Fill empty cells in the GPU grid
+	 */
+	__global__ void cuda_fillVoid()
+	{
+		
+	}
+
+	/*
+	 * Calculate LOD and saves it in the affected cells
+	 */
+	__global__ void cuda_calculateLOD()
+	{
+		
+	}
+
+	/*
 	* Set device parameters
-	* TODO: replace with a single Memcpy call?
 	*/
 	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos, float max_h)
 	{
@@ -202,6 +218,10 @@ namespace CudaSpace
 		*pixel_to_grid_matrix = (glm::mat3x3(u,v,w));
 
 	}
+
+	/* 
+	 * Initialize device 
+	 */
 	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_res, glm::ivec2 texture_res, float* d_gpu_pointBuffer, unsigned char *d_color_map, glm::ivec2 color_map_res, glm::vec2 cell_siz)
 	{
 		frame_dimension = new glm::vec3();
@@ -219,6 +239,10 @@ namespace CudaSpace
 		*color_map_resolution = color_map_res;
 		*cell_size = cell_siz;
 	}
+
+	/*
+	* Free device's variables
+	*/
 	__global__ void cuda_freeDeviceVariables()
 	{
 		delete(grid_camera_position);
@@ -231,7 +255,7 @@ namespace CudaSpace
 	}
 
 	/*
-	 * Set grid and block dimensions, pass parameters to device and call kernels
+	 * Set grid and block dimensions, create LOD, pass parameters to device and call kernels
 	 */
 	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer, float max_height)
 	{

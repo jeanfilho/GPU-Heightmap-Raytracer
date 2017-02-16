@@ -366,13 +366,17 @@ void renderTexture()
 
 /*
 * Set up CPU-Side buffer that is going to be transferred over to the GPU
+* 
+* NOTE: it is more efficient to pre-allocate the point
+* buffer in the RAM and then pass it to the GPU
+* than passing every line at a time 
 */
 void copyPointBuffer()
 {
 	/*Copies a portion of the grid to raytrace in the gpu*/
 	int x, y;
-	x = int(floor(camera_position.x / cell_size.x)) - point_buffer_resolution.x / 2;
-	y = int(floor(camera_position.z / cell_size.y)) - point_buffer_resolution.y / 2;
+	x = int(floor(camera_position.x - point_buffer_resolution.x / 2 * cell_size.x)) ;
+	y = int(floor(camera_position.z - point_buffer_resolution.y / 2 * cell_size.y)) ;
 	int size = sizeof(float) * point_buffer_resolution.x;
 	for (int i = 0; i < point_buffer_resolution.y; i++)
 	{
@@ -384,7 +388,9 @@ void copyPointBuffer()
 	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
 }
 
-/*Handle the camera movement*/
+/*
+ *Handle the camera movement
+ */
 void moveCamera()
 {
 	camera_position += delta_time.count() * (glm::vec3(0, movement_up, 0) + glm::normalize(glm::vec3(camera_forward.x, 0, camera_forward.z)) * movement_fwd + glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0))) * movement_rht);
@@ -407,7 +413,9 @@ void moveCamera()
 		camera_position.y = max_height * 2;
 
 }
-
+/*
+ * Handle camera rotation
+ */
 void rotateCamera()
 {
 
