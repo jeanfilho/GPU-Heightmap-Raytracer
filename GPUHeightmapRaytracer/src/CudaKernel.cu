@@ -22,7 +22,9 @@ namespace CudaSpace
 	__device__ glm::ivec2 *color_map_resolution;
 	__device__ glm::mat3x3 *pixel_to_grid_matrix;
 
-	/*Get a colormap index from a height map index*/
+	/*
+	 *Get a colormap index from a height map index
+	 */
 	__device__ int getColorMapIndex(int posX, int posZ)
 	{
 		int colorX, colorZ;
@@ -40,8 +42,8 @@ namespace CudaSpace
 	}
 
 	/*
-	* Set up parameters for tracing a single ray
-	*/
+	 * Set up parameters for tracing a single ray
+	 */
 	__device__ void setUpParameters(float &tMax, float &tDelta, char &step, int &pos, float ray_origin, float ray_direction, float cell_dimension)
 	{
 		/*Set starting voxel*/
@@ -73,12 +75,11 @@ namespace CudaSpace
 	__device__ int castRay(glm::vec3& ray_origin, glm::vec3& ray_direction)
 	{
 		float tMaxX, tMaxZ, tDeltaX, tDeltaZ;
-		int posX, posZ;
+		int posX, posZ, height_index, LOD = 1;
 		char stepX, stepZ;
-		int LOD = 0;
-		
-		int height_index;
 		glm::vec3 current_ray_position;
+
+		int resX = point_buffer_resolution->x;
 
 		setUpParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, cell_size->x);
 		setUpParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, cell_size->y);

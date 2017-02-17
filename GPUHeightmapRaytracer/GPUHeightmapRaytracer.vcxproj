@@ -101,6 +101,9 @@
     <PostBuildEvent>
       <Message>Copy external dll</Message>
     </PostBuildEvent>
+    <CudaCompile>
+      <GenerateLineInfo>true</GenerateLineInfo>
+    </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -118,6 +121,9 @@
     <PostBuildEvent>
       <Message>Copy external dll</Message>
     </PostBuildEvent>
+    <CudaCompile>
+      <GenerateLineInfo>true</GenerateLineInfo>
+    </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
