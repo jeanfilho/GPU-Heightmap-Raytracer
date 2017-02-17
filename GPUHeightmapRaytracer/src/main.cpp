@@ -241,7 +241,6 @@ void loadPointDataLAS(std::string filename)
 		if (max_height < fZ && fZ - max_height < height_tolerance)
 		{
 			max_height = fZ;
-			std::cout << "Max height: " << max_height << std::endl;
 		}
 	}
 
@@ -404,8 +403,6 @@ void moveCamera()
 		camera_position.z = (point_buffer_resolution.y / 2) * cell_size.y ;
 	if (camera_position.z >= (cpu_point_grid_resolution.y - point_buffer_resolution.y / 2) * cell_size.y)
 		camera_position.z =  (cpu_point_grid_resolution.y - point_buffer_resolution.y / 2) * cell_size.y;
-
-	std::cout << camera_position.x << " " << camera_position.z << std::endl;
 
 	if (camera_position.y < 0)
 		camera_position.y = 0;
