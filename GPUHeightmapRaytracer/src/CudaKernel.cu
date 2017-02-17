@@ -41,8 +41,6 @@ namespace CudaSpace
 
 	/*
 	* Set up parameters for tracing a single ray
-	* 
-	* Ray always starts in the grid
 	*/
 	__device__ void setUpParameters(float &tMax, float &tDelta, char &step, int &pos, float ray_origin, float ray_direction, float cell_dimension)
 	{
@@ -78,7 +76,7 @@ namespace CudaSpace
 		int posX, posZ;
 		char stepX, stepZ;
 		int LOD = 0;
-
+		
 		int height_index;
 		glm::vec3 current_ray_position;
 
@@ -124,9 +122,7 @@ namespace CudaSpace
 			}
 
 			/*Check if ray is outside of the grid and going up after max_height is reached*/
-			if (posX >= point_buffer_resolution->x || posX < 0 ||
-				posZ >= point_buffer_resolution->y || posZ < 0 ||
-				current_ray_position.y < 0 || current_ray_position.y > max_height && ray_direction.y >= 0)
+			if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0 ||	current_ray_position.y < 0 || current_ray_position.y > max_height && ray_direction.y >= 0)
 			{
 				return -1;
 			}
@@ -140,7 +136,7 @@ namespace CudaSpace
 	__device__ glm::vec3 viewToGridSpace(glm::ivec2 &pixel_position)
 	{
 		glm::vec3 result = glm::vec3(
-			frame_dimension->x / 2.0f - (frame_dimension->x) * pixel_position.x / (texture_resolution->x - 1),
+			 frame_dimension->x / 2.0f - (frame_dimension->x) * pixel_position.x / (texture_resolution->x - 1),
 			-frame_dimension->y / 2.0f + (frame_dimension->y) * pixel_position.y / (texture_resolution->y - 1),
 			-frame_dimension->z);
 		return result;
@@ -215,7 +211,7 @@ namespace CudaSpace
 		w = -camera_for;
 		u = glm::normalize(glm::cross(glm::vec3(0, 100, 0), w));
 		v = glm::cross(w, u);
-		*pixel_to_grid_matrix = (glm::mat3x3(u,v,w));
+		*pixel_to_grid_matrix = glm::mat3x3(u,v,w);
 
 	}
 

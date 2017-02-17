@@ -45,7 +45,7 @@
 //============================
 
 // Filenames
-std::string point_cloud_file = "points.las";
+std::string point_cloud_file = "autzen.las";
 std::string color_map_file = "autzen.jpg";
 
 // Camera related
