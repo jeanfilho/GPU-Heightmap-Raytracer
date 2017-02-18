@@ -107,7 +107,7 @@ struct cudaGraphicsResource* cuda_pbo_resource;
 /*Loads JPEG image from disk*/
 bool loadJPEG(std::string filename)
 {
-	unsigned char *image_buffer, *it;
+	unsigned char *pos;
 	unsigned char r, g, b;
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -118,7 +118,7 @@ bool loadJPEG(std::string filename)
 	jpeg_create_decompress(&cinfo);
 
 	/*Open JPEG and start decompression*/
-	int row_stride;
+	int row;
 	FILE * infile;
 	if (fopen_s(&infile, ("../Data/" + filename).c_str(), "rb") != NULL) 
 	{
@@ -132,29 +132,29 @@ bool loadJPEG(std::string filename)
 	
 	width = cinfo.output_width;
 	height = cinfo.output_height;
-	image_buffer = new unsigned char[width*height * 3];
-	it = image_buffer + width * height * 3;
+	h_color_map = new unsigned char[width*height * 3];
+	pos = h_color_map + width * height * 3;
 
-	row_stride = width * cinfo.output_components;
+	row = width * cinfo.output_components;
 	pJpegBuffer = (*cinfo.mem->alloc_sarray)
-		(reinterpret_cast<j_common_ptr>(&cinfo), JPOOL_IMAGE, row_stride, 1);
+		(reinterpret_cast<j_common_ptr>(&cinfo), JPOOL_IMAGE, row, 1);
 
-	/*Read data in JPEG - scan from top to bottom*/
+	/*Read data in JPEG - scan happens from top to bottom*/
 	while (cinfo.output_scanline < cinfo.output_height)
 	{
 		jpeg_read_scanlines(&cinfo, pJpegBuffer, 1);
-		it -= row_stride;
+		pos -= row;
 		for (int x = 0; x < width; x++)
 		{
 			r = pJpegBuffer[0][cinfo.output_components * x];
 			g = pJpegBuffer[0][cinfo.output_components * x + 1];
 			b = pJpegBuffer[0][cinfo.output_components * x + 2];
 
-			*(it++) = r;
-			*(it++) = g;
-			*(it++) = b;
+			*(pos++) = r;
+			*(pos++) = g;
+			*(pos++) = b;
 		}
-		it -= row_stride;
+		pos -= row;
 	}
 
 	/*Finish decompression and release object*/
@@ -162,7 +162,6 @@ bool loadJPEG(std::string filename)
 	jpeg_destroy_decompress(&cinfo);
 	fclose(infile);
 
-	h_color_map = image_buffer;
 	color_map_resolution = glm::ivec2(width, height);
 
 	/*Pass values to GPU*/
@@ -175,7 +174,7 @@ bool loadJPEG(std::string filename)
 
 /*
  * Load points using libLas Library in LAS format
- * Snippet from: http://www.liblas.org/tutorial/cpp.html
+ * Source: http://www.liblas.org/tutorial/cpp.html
  */
 void loadPointDataLAS(std::string filename)
 {
@@ -248,13 +247,13 @@ void loadPointDataLAS(std::string filename)
 	ifs.close();
 }
 
-/*Snippet from http://www.nvidia.com/content/GTC/documents/1055_GTC09.pdf
- * and http://www.songho.ca/opengl/gl_pbo.html
- *
+/*
  * This method sets up a texture object and its respective buffers to share with CUDA device
  *
  * GL_TEXTURE_RECTANGLE is used to avoid generating mip maps and wasting resources
- * Source: https://www.khronos.org/opengl/wiki/Rectangle_Texture
+ * Sources: 
+ * https://www.khronos.org/opengl/wiki/Rectangle_Texture
+ * http://www.songho.ca/opengl/gl_pbo.html
  *
  */
  // Setup Texture
@@ -657,7 +656,7 @@ int main(int argc, char** argv)
 	glutInit(&argc, argv);
 
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
-	glutInitWindowSize(800, 600);
+	glutInitWindowSize(1024, 768);
 	glutInitWindowPosition(100, 100);
 	glutCreateWindow("GPU Heightmap Raytracer 2k17");
 
@@ -685,7 +684,7 @@ int main(int argc, char** argv)
 
 	initialize();
 	atexit(freeResourcers);
-	initGL(800, 600);
+	initGL(1024, 768);
 
 	glutMainLoop();
 
