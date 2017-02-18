@@ -34,7 +34,9 @@
  */
 namespace CudaSpace
 {
-	__host__ void rayTrace(glm::ivec2& point_buffer_res, glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_position, unsigned char* colorBuffer, float max_height, bool fillVoid, bool calculateLOD);
+	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_position, unsigned char* colorBuffer, float max_height);
 	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_res, glm::vec2& cell_size);
+	__host__ void fillVoid(glm::ivec2& point_buffer_resolution);
+	__host__ void calculateLOD(glm::ivec2& point_buffer_resolution, float *d_point_buffer);
 	__host__ void freeDeviceVariables();
 }

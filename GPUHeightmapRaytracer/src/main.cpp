@@ -304,8 +304,8 @@ void updateTexture()
 	size_t size;
 	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
 
-	//Call the wrapper method invoking the CUDA Kernel
-	CudaSpace::rayTrace(point_buffer_resolution, texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height, true, true);
+	//Call the wrapper function invoking the CUDA Kernel
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
