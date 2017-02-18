@@ -45,7 +45,7 @@
 //============================
 
 // Filenames
-std::string point_cloud_file = "autzen.las";
+std::string point_cloud_file = "points.las";
 std::string color_map_file = "autzen.jpg";
 
 // Camera related
@@ -207,7 +207,7 @@ void loadPointDataLAS(std::string filename)
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
 
 	/*Calculate area per point to set cell dimension*/
-	float point_area = deltaX * deltaY / header.GetPointRecordsCount();
+	float point_area = float(deltaX * deltaY / header.GetPointRecordsCount());
 	cell_size.x = point_area;
 	cell_size.y = point_area;
 
@@ -229,9 +229,9 @@ void loadPointDataLAS(std::string filename)
 		int x, y, index;
 		float fX, fY, fZ;
 
-		fX = p.GetX() - header.GetMinX();
-		fY = p.GetY() - header.GetMinY();
-		fZ = p.GetZ() - header.GetMinZ();
+		fX = float(p.GetX() - header.GetMinX());
+		fY = float(p.GetY() - header.GetMinY());
+		fZ = float(p.GetZ() - header.GetMinZ());
 		x = static_cast<int>(glm::floor(fX / cell_size.x));
 		y = static_cast<int>(glm::floor(fY / cell_size.y));
 
@@ -305,7 +305,7 @@ void updateTexture()
 	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
 
 	//Call the wrapper method invoking the CUDA Kernel
-	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height);
+	CudaSpace::rayTrace(point_buffer_resolution, texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height, true, true);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
