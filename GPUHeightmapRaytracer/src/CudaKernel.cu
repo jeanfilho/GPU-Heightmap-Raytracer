@@ -73,7 +73,7 @@ namespace CudaSpace
 	 */
 	__device__ void castRay(glm::vec3& ray_origin, glm::vec3& ray_direction, glm::uvec3& result)
 	{
-		float tMaxX, tMaxZ, tDeltaX, tDeltaZ;
+		float tMaxX, tMaxZ, tDeltaX, tDeltaZ, height_value;
 		int posX, posZ, height_index, LOD = 1;
 		char stepX, stepZ;
 		glm::vec3 current_ray_position;
@@ -100,7 +100,16 @@ namespace CudaSpace
 				current_ray_position = ray_origin + ray_direction * glm::min(tMaxX, tMaxZ);
 						
 			height_index = posX + point_buffer_resolution->x * posZ;
-			if (point_buffer[height_index] >= current_ray_position.y)
+			height_value = 0;
+			for(int i = 0; i < LOD; i++)
+			{
+				for (int j = 0; j < LOD; j++)
+				{
+					height_value += point_buffer[height_index - stepX * i - stepZ * j * point_buffer_resolution->x];
+				}
+			}
+			height_value /= LOD * LOD;
+			if (height_value >= current_ray_position.y)
 			{
 				getColorMapIndex(posX, posZ, result);
 				return;
@@ -109,11 +118,13 @@ namespace CudaSpace
 			/*Advance ray through the grid*/
 			if(tMaxX < tMaxZ)
 			{
+				if (tMaxX > 2000) LOD = 10; else if (tMaxX > 1000) LOD = 5; else LOD = 1;
 				tMaxX += tDeltaX * LOD;
 				posX += stepX * LOD;
 			}
 			else
 			{
+				if (tMaxZ > 2000) LOD = 10; else if (tMaxZ > 1000) LOD = 5; else LOD = 1;
 				tMaxZ += tDeltaZ * LOD;
 				posZ += stepZ * LOD;
 			}
