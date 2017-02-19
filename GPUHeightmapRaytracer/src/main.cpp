@@ -45,7 +45,7 @@
 //============================
 
 // Filenames
-std::string point_cloud_file = "autzen.las";
+std::string point_cloud_file = "points.las";
 std::string color_map_file = "autzen.jpg";
 
 // Camera related
@@ -57,6 +57,8 @@ glm::vec3
 
 GLuint textureID;
 GLuint bufferID;
+bool use_LOD = false;
+bool use_color_map = false;
 
 // JPEG image
 unsigned char *h_color_map = NULL;
@@ -71,7 +73,7 @@ float* cpu_point_grid;
 glm::ivec2 cpu_point_grid_resolution = glm::zero<glm::ivec2>();
 glm::vec2 cell_size;
 float max_height = 0;
-float height_tolerance = 50;
+float height_tolerance = 10;
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -304,7 +306,7 @@ void updateTexture()
 	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
 
 	//Call the wrapper function invoking the CUDA Kernel
-	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height);
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height, use_color_map, use_LOD);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
@@ -486,7 +488,7 @@ void keyboardDown(unsigned char key, int x, int y)
 	case 'p':
 	case '27':
 		exit(0);
-	/*movement*/
+	/* Movement */
 	case 'e':
 		movement_up = qe_movement_distance;
 		break;
@@ -506,7 +508,7 @@ void keyboardDown(unsigned char key, int x, int y)
 		movement_fwd = -wasd_movement_distance;
 		break;
 
-	/*rotation*/
+	/* Rotation */
 	case 'i':
 		rotation_right = ik_rotation_angle;
 		break;
@@ -519,6 +521,14 @@ void keyboardDown(unsigned char key, int x, int y)
 	case 'l':
 		rotation_up = jl_rotation_angle;
 		break;
+
+	/* Visualization parameters */
+	case 'r':
+		if (h_color_map != NULL)
+			use_color_map = !use_color_map;
+		break;
+	case 't':
+		use_LOD = !use_LOD;
 	default:;
 	}
 }

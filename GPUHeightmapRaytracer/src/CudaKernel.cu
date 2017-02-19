@@ -5,6 +5,7 @@
 
 namespace CudaSpace
 {
+	__device__ bool use_color_map = false, use_LOD = false;
 	__device__ float max_height = 0;
 	__device__ float *point_buffer;
 	__device__ unsigned char *color_map;
@@ -21,15 +22,38 @@ namespace CudaSpace
 	__device__ glm::mat3x3 *pixel_to_grid_matrix;
 
 	/*
-	 *Get a colormap index from a height map index
-	 */
-	__device__ void getColorMapIndex(int posX, int posZ, glm::uvec3& result)
+	* Get a colormap value from a height map index
+	*/
+	__device__ void getColorMapValue(int posX, int posZ, glm::uvec3& result)
 	{
 		int colorX, colorZ;
 		colorX = float(posX) / float(point_buffer_resolution->x) * color_map_resolution->x;
 		colorZ = float(posZ) / float(point_buffer_resolution->y) * color_map_resolution->y;
 		int index = (colorX + colorZ * color_map_resolution->x) * 3;
 		result = glm::uvec3(color_map[index], color_map[index + 1], color_map[index + 2]);
+	}
+
+	/*
+	* Get a value based on max height
+	*/
+	__device__ void getHeightColorValue(float height, glm::uvec3& result)
+	{
+		unsigned char r, g, b;
+		height = height * 2 / max_height ;
+		if(height > 1)
+		{
+			height -= 1;
+			r = 255;
+			g = 255 - height * 255;
+			b = 0;
+		}
+		else
+		{
+			r = 255 * height;
+			g = r;
+			b = 255 - height * 255;
+		}
+		result = glm::uvec3(r, g, b);
 	}
 
 	/*
@@ -99,6 +123,8 @@ namespace CudaSpace
 			else
 				current_ray_position = ray_origin + ray_direction * glm::min(tMaxX, tMaxZ);
 						
+
+			/* Calculate the height value in this cell based on LOD */
 			height_index = posX + point_buffer_resolution->x * posZ;
 			height_value = 0;
 			for(int i = 0; i < LOD; i++)
@@ -109,22 +135,33 @@ namespace CudaSpace
 				}
 			}
 			height_value /= LOD * LOD;
+
+			/*Check if ray intersects*/
 			if (height_value >= current_ray_position.y)
 			{
-				getColorMapIndex(posX, posZ, result);
+				if (use_color_map)
+					getColorMapValue(posX, posZ, result);
+				else
+					getHeightColorValue(height_value, result);
 				return;
 			}
 
 			/*Advance ray through the grid*/
 			if(tMaxX < tMaxZ)
 			{
-				if (tMaxX > 2000) LOD = 10; else if (tMaxX > 1000) LOD = 5; else LOD = 1;
+				if (use_LOD)
+					if (tMaxX > 2000) LOD = 10; else if (tMaxX > 1000) LOD = 5; else LOD = 1;
+				else
+					LOD = 1;
 				tMaxX += tDeltaX * LOD;
 				posX += stepX * LOD;
 			}
 			else
 			{
-				if (tMaxZ > 2000) LOD = 10; else if (tMaxZ > 1000) LOD = 5; else LOD = 1;
+				if (use_LOD)
+					if (tMaxZ > 2000) LOD = 10; else if (tMaxZ > 1000) LOD = 5; else LOD = 1;
+				else
+					LOD = 1;
 				tMaxZ += tDeltaZ * LOD;
 				posZ += stepZ * LOD;
 			}
@@ -184,82 +221,15 @@ namespace CudaSpace
 	}
 
 	/*
-	 * Fill empty cells in the GPU grid
-	 */
-	__global__ void cuda_fillVoid(glm::ivec2 grid_resolution, float* grid, float* temp_grid)
-	{
-		int threadId, count, posX, posY, tempX, tempY;
-		float value;
-
-		posX = blockIdx.x * gridDim.x + threadIdx.x;
-		posY = blockIdx.y * gridDim.y + threadIdx.y;
-		threadId = posX + posY * point_buffer_resolution->x;
-		if (threadId > point_buffer_resolution->x * point_buffer_resolution->y || abs(temp_grid[threadId]) < 0.01f)
-			return;
-
-		count = 0;
-		value = 0;
-
-		for (int i = 0; i < 7; i++)
-		{
-			for (int j = 0; j < 7; j++)
-			{
-				if (i == 3 && j == 3)
-					continue;
-
-				tempX = posX - 3 + i;
-				tempY = posY - 3 + j;
-				if (tempX >= 0 && tempX < grid_resolution.x && tempY >= 0 && tempY < grid_resolution.y)
-				{
-					count++;
-					value += grid[tempX + tempY * grid_resolution.x];
-				}
-			}
-		}
-		temp_grid[threadId] = value / count;
-	}
-
-	/*
-	 * Calculate LOD and save it in the affected cells
-	 */
-	__global__ void cuda_calculateLOD(glm::ivec2 grid_resolution, float* grid, float* temp_grid, int cells)
-	{
-		int threadId, count, posX, posY, tempX, tempY;
-		float value;
-
-		posX = blockIdx.x * gridDim.x + threadIdx.x;
-		posY = blockIdx.y * gridDim.y + threadIdx.y;
-		threadId =  posX + posY * point_buffer_resolution->x;
-		if (threadId > point_buffer_resolution->x * point_buffer_resolution->y)
-			return;
-		
-		count = 0;
-		value = 0;
-
-		for (int i = 0; i < cells; i++)
-		{
-			for (int j = 0; j < cells; j++)
-			{
-				tempX = posX + i;
-				tempY = posY + j;
-				if (tempX < grid_resolution.x && tempY < grid_resolution.y)
-				{
-					count++;
-					value += grid[tempX + tempY * grid_resolution.x];
-				}
-			}
-		}
-		temp_grid[threadId] = value/count;
-	}
-
-	/*
 	* Set device parameters
 	*/
-	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos, float max_h)
+	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos, float max_h, bool use_color, bool use_lod)
 	{
 		*frame_dimension = frame_dim;
 		grid_camera_position->y = grid_camera_pos.y;
 		max_height = max_h;
+		use_color_map = use_color;
+		use_LOD = use_lod;
 
 		/*Basis change matrix from view to grid space*/
 		glm::vec3 u, v, w;
@@ -307,7 +277,7 @@ namespace CudaSpace
 	/*
 	 * Set grid and block dimensions, create LOD, pass parameters to device and call kernels
 	 */
-	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer, float max_height)
+	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer, float max_height, bool use_color_map, bool use_LOD)
 	{
 		/*
 		 * Things to consider:
@@ -318,36 +288,12 @@ namespace CudaSpace
 		dim3 gridSize, blockSize;
 
 		
-		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos, max_height);
+		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos, max_height, use_color_map, use_LOD);
 		checkCudaErrors(cudaDeviceSynchronize());
 		
 		blockSize = dim3(1, 480);
 		gridSize = dim3(texture_resolution.x / blockSize.x, texture_resolution.y / blockSize.y);
 		cuda_rayTrace << <gridSize, blockSize >> > (color_buffer);
-		checkCudaErrors(cudaDeviceSynchronize());
-	}
-
-	/*
-	* Fill cells that do not contain values in grid
-	*/
-	__host__ void fillVoid(glm::ivec2 & point_buffer_resolution)
-	{
-		dim3 blockSize, gridSize;
-		//TODO: implement
-	}
-
-	/*
-	* Calculate the LOD in the grid
-	*/
-	__host__ void calculateLOD(glm::ivec2 & d_grid_resolution, float *d_grid)
-	{
-		dim3 blockSize, gridSize;
-		float* d_temp_grid;
-
-		checkCudaErrors(cudaMalloc(&d_temp_grid, sizeof(float) * d_grid_resolution.x * d_grid_resolution.y));		
-		blockSize = dim3(64, 32);
-		gridSize = dim3(d_grid_resolution.x / blockSize.x, d_grid_resolution.y / blockSize.y);
-		cuda_calculateLOD << <gridSize, blockSize >> > (d_grid_resolution, d_grid, d_temp_grid, 5);
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
