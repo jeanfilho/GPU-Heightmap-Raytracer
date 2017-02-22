@@ -291,7 +291,7 @@ namespace CudaSpace
 		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos, max_height, use_color_map, use_LOD);
 		checkCudaErrors(cudaDeviceSynchronize());
 		
-		blockSize = dim3(1, 480);
+		blockSize = dim3(1, 1080/2);
 		gridSize = dim3(texture_resolution.x / blockSize.x, texture_resolution.y / blockSize.y);
 		cuda_rayTrace << <gridSize, blockSize >> > (color_buffer);
 		checkCudaErrors(cudaDeviceSynchronize());

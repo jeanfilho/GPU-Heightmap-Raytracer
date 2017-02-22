@@ -23,6 +23,7 @@
 #include <thread>
 #include <string>
 #include <chrono>
+#include <thread>
 
 #include <GL/glew.h>
 #include <GL/freeglut.h>
@@ -49,11 +50,12 @@ std::string point_cloud_file = "points.las";
 std::string color_map_file = "autzen.jpg";
 
 // Camera related
-glm::ivec2 texture_resolution(640, 480);
+glm::ivec2 texture_resolution(1920, 1080);
 glm::vec3
-	camera_position(1500, 200, 0),
-	camera_forward = glm::normalize(glm::vec3(5, -.9, 0)),
+	camera_position(0, 0, 0),
+	camera_forward(glm::normalize(glm::vec3(5, -.9, 0))),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
+glm::vec2 boundaries(0, 0);
 
 GLuint textureID;
 GLuint bufferID;
@@ -66,14 +68,17 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-glm::ivec2 point_buffer_resolution = glm::ivec2(1024 * 5, 1024 * 5);
+glm::ivec2 point_buffer_resolution = glm::ivec2(512, 512);
 
 // CPU-Side point grid
-float* cpu_point_grid;
-glm::ivec2 cpu_point_grid_resolution = glm::zero<glm::ivec2>();
-glm::vec2 cell_size;
+const int cpu_point_section_size = 4;
+float* cpu_point_section[cpu_point_section_size][cpu_point_section_size];
+glm::vec2 point_section_origin[cpu_point_section_size][cpu_point_section_size];
+glm::vec2 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
+const int LOD_levels = 4;
+const int stride_x = glm::pow(4, LOD_levels - 1) + 1; // Number of elements per Quad-tree root
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -173,17 +178,16 @@ bool loadJPEG(std::string filename)
 	
 	return true;
 }
-
 /*
- * Load points using libLas Library in LAS format
+ * Read LAS header before starting the ray tracing and collect necessary information
  * Source: http://www.liblas.org/tutorial/cpp.html
  */
-void loadPointDataLAS(std::string filename)
+void readLASHeader(std::string filename)
 {
 	/*Create input stream and associate it with .las file opened to read in binary mode*/
 	std::ifstream ifs;
 	ifs.open("../Data/" + filename, std::ios::in | std::ios::binary);
-	if(!ifs.is_open())
+	if (!ifs.is_open())
 	{
 		std::cout << "Error opening " + filename << std::endl;
 		exit(1);
@@ -212,32 +216,70 @@ void loadPointDataLAS(std::string filename)
 	cell_size.x = point_area;
 	cell_size.y = point_area;
 
-	/*Allocate Grids*/
-	cpu_point_grid_resolution = glm::ivec2(glm::floor(deltaX / cell_size.x) + 1, glm::floor(deltaY / cell_size.y) + 1);
-	cpu_point_grid = new float[cpu_point_grid_resolution.x * cpu_point_grid_resolution.y]();
-	std::cout << "Grid Resolution: " << cpu_point_grid_resolution.x << " " <<cpu_point_grid_resolution.y << std::endl;
+	/*Place the camera on the center of the point cloud*/
+	camera_position = glm::vec3(deltaX / 2, header.GetMaxZ() - header.GetMinZ(), deltaY/2);
 
-	/*Reduce size of gpu grid if the cpu grid is too small*/
-	if (point_buffer_resolution.x > cpu_point_grid_resolution.x)
-		point_buffer_resolution.x = cpu_point_grid_resolution.x;
-	if (point_buffer_resolution.y > cpu_point_grid_resolution.y)
-		point_buffer_resolution.y = cpu_point_grid_resolution.y;
+	/*Close the file stream*/
+	ifs.close();
+}
+
+/*
+* Load points using libLas Library in LAS format
+* Source: http://www.liblas.org/tutorial/cpp.html
+*/
+void loadPointDataLASToGrid(std::string filename, float *grid_section)
+{
+	/*Create input stream and associate it with .las file opened to read in binary mode*/
+	std::ifstream ifs;
+	ifs.open("../Data/" + filename, std::ios::in | std::ios::binary);
+	if (!ifs.is_open())
+	{
+		std::cout << "Error opening " + filename << std::endl;
+		exit(1);
+	}
+
+	/*Create a ReaderFactory and instantiate a new liblas::Reader using the stream.*/
+	liblas::ReaderFactory f;
+	liblas::Reader reader = f.CreateWithStream(ifs);
+
+	/*After the reader has been created, you can access members of the Public Header Block*/
+	liblas::Header const& header = reader.GetHeader();
 
 	/*Iterate through point records and calculate the height contribution to each neighboring grid cell*/
 	while (reader.ReadNextPoint())
 	{
 		liblas::Point const& p = reader.GetPoint();
-		int x, y, index;
+		int x, y, // X and Y coordinates in the finest grid
+			temp_x, temp_y;
+		unsigned int index[LOD_levels];
 		float fX, fY, fZ;
 
+		//TODO: check if point resides in grid or not -> grid must have boundaries defined (an origin)
 		fX = float(p.GetX() - header.GetMinX());
 		fY = float(p.GetY() - header.GetMinY());
 		fZ = float(p.GetZ() - header.GetMinZ());
 		x = static_cast<int>(glm::floor(fX / cell_size.x));
 		y = static_cast<int>(glm::floor(fY / cell_size.y));
 
-		index = x + y * cpu_point_grid_resolution.x;
-		cpu_point_grid[index] = fZ;
+		/* Calculate offsets in grid */
+		temp_x = x / glm::pow(2, LOD_levels - 1);
+		temp_y = y / glm::pow(2, LOD_levels - 1);
+		index[LOD_levels - 1] = temp_x * stride_x + temp_y * point_buffer_resolution.x * stride_x;
+		for (int i = LOD_levels - 2; i >= 0; i--)
+		{
+			temp_x = x % static_cast<int>(glm::pow(2, i + 1)) / static_cast<int>(glm::pow(2, i)); // results in either 0 or 1
+			temp_y = x % static_cast<int>(glm::pow(2, i + 1)) / static_cast<int>(glm::pow(2, i));
+			index[i] = index[i + 1] + 1 + (temp_x * (static_cast<int>(glm::pow(4, i - 1)) + 1) + temp_y * 2 * static_cast<int>(glm::pow(4, i - 1)) + 1);
+		}
+
+		for (int i = 0; i < LOD_levels; i++)
+		{
+
+			if (grid_section[index[i]] <= fZ)
+				grid_section[index[i]] = fZ;
+			else
+				break;
+		}
 
 		if (max_height < fZ && fZ - max_height < height_tolerance)
 		{
@@ -247,6 +289,27 @@ void loadPointDataLAS(std::string filename)
 
 	/*Close the file stream*/
 	ifs.close();
+}
+
+/*
+ * Allocate a grid section for the out-of-core functionality
+ * The quad-tree piramid is allocate contiguously to facilitate the copy of a section
+ */
+void allocateGridSection(glm::ivec2 pos)
+{
+	if(cpu_point_section[pos.x][pos.y] != NULL)
+	{
+		delete[] cpu_point_section[pos.x][pos.y];
+	}
+	cpu_point_section[pos.x][pos.y] = new float[sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * (glm::pow(4, LOD_levels-1) + 1)]();
+	std::thread t(loadPointDataLASToGrid, point_cloud_file, cpu_point_section[pos.x][pos.y]);
+	t.detach();
+}
+
+/**/
+void initializeSections()
+{
+	//TODO: implement
 }
 
 /*
@@ -370,18 +433,21 @@ void renderTexture()
 * NOTE: it is more efficient to pre-allocate the point
 * buffer in the RAM and then pass it to the GPU
 * than passing every line at a time 
+* 
+* 
 */
 void copyPointBuffer()
 {
+	//TODO: implement new copying between sections
 	/*Copies a portion of the grid to raytrace in the gpu*/
 	int x, y;
-	x = int(floor(camera_position.x - point_buffer_resolution.x / 2 * cell_size.x)) ;
-	y = int(floor(camera_position.z - point_buffer_resolution.y / 2 * cell_size.y)) ;
+	x = static_cast<int>(floor(camera_position.x - point_buffer_resolution.x / 2 * cell_size.x)) ;
+	y = static_cast<int>(floor(camera_position.z - point_buffer_resolution.y / 2 * cell_size.y)) ;
 	int size = sizeof(float) * point_buffer_resolution.x;
 	for (int i = 0; i < point_buffer_resolution.y; i++)
 	{
-		int offset = x + (y + i) * cpu_point_grid_resolution.x;
-		memcpy(h_point_buffer + i * point_buffer_resolution.x, cpu_point_grid + offset, size);
+		int offset = x * stride_x + (y + i) * point_buffer_resolution.x * stride_x;
+		memcpy(h_point_buffer + i * point_buffer_resolution.x, cpu_point_section[0] + offset, size);
 	}
 
 	/*Send gpu point buffer to the gpu*/
@@ -395,20 +461,20 @@ void moveCamera()
 {
 	camera_position += delta_time.count() * (glm::vec3(0, movement_up, 0) + glm::normalize(glm::vec3(camera_forward.x, 0, camera_forward.z)) * movement_fwd + glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0))) * movement_rht);
 	
-	if (camera_position.x < (point_buffer_resolution.x / 2) * cell_size.x)
-		camera_position.x = (point_buffer_resolution.x / 2) * cell_size.x;
-	if (camera_position.x >= (cpu_point_grid_resolution.x - point_buffer_resolution.x / 2) * cell_size.x)
-		camera_position.x =  (cpu_point_grid_resolution.x - point_buffer_resolution.x / 2) * cell_size.x;
+	if (camera_position.x < 0)
+		camera_position.x = 0;
+	if (camera_position.x >= boundaries.x)
+		camera_position.x = boundaries.x - 0.00001f;
 
-	if (camera_position.z < (point_buffer_resolution.y / 2) * cell_size.y)
-		camera_position.z = (point_buffer_resolution.y / 2) * cell_size.y ;
-	if (camera_position.z >= (cpu_point_grid_resolution.y - point_buffer_resolution.y / 2) * cell_size.y)
-		camera_position.z =  (cpu_point_grid_resolution.y - point_buffer_resolution.y / 2) * cell_size.y;
+	if (camera_position.z < 0)
+		camera_position.z = 0;
+	if (camera_position.z >= boundaries.y)
+		camera_position.z = boundaries.y - 0.00001f;
 
 	if (camera_position.y < 0)
 		camera_position.y = 0;
-	if (camera_position.y >= max_height * 2)
-		camera_position.y = max_height * 2;
+	if (camera_position.y >= max_height * 4)
+		camera_position.y = max_height * 4;
 
 }
 /*
@@ -419,17 +485,6 @@ void rotateCamera()
 
 	camera_forward = glm::rotate(camera_forward, rotation_up * delta_time.count(), glm::vec3(0, 1, 0));
 	camera_forward = glm::rotate(camera_forward, rotation_right * delta_time.count(), glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0))));
-}
-
-//============================
-//		THREAD FUNCTIONS
-//============================
-/*
- * Load point data closest to the camera from the HDD
- */
-void loadPointsFromDisk()
-{
-	//TODO: implement
 }
 
 
@@ -637,7 +692,6 @@ void initialize()
 
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
 	loadJPEG(color_map_file);
-	loadPointDataLAS(point_cloud_file);
 	setupTexture();
 	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y));
@@ -651,7 +705,6 @@ void freeResourcers()
 	checkCudaErrors(cudaFree(d_point_buffer));
 	checkCudaErrors(cudaFree(d_color_map));
 	delete[](h_color_map);
-	delete[](cpu_point_grid);
 	delete[](h_point_buffer);
 	CudaSpace::freeDeviceVariables();
 }
