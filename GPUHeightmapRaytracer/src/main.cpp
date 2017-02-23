@@ -506,21 +506,73 @@ void manageSections()
 *
 */
 void copyPointBuffer()
-{
-	//TODO: implement new copying between sections
+{	
+	glm::vec3 bottom_left, top_right, offset;
+	int minX, maxX, minY, maxY;
 
-	/*Copies a portion of the grid to raytrace in the gpu*/
-	int x, y;
-	x = static_cast<int>(floor(camera_position.x - point_buffer_resolution.x / 2 * cell_size.x));
-	y = static_cast<int>(floor(camera_position.z - point_buffer_resolution.y / 2 * cell_size.y));
-	int size = sizeof(float) * point_buffer_resolution.x;
-	for (int i = 0; i < point_buffer_resolution.y; i++)
+	/*Set the corners of the point buffer*/
+	offset = glm::vec3(cell_size.x * point_buffer_resolution.x / 2.0f, 0, cell_size.y * point_buffer_resolution.y / 2.0f);
+	bottom_left = camera_position - offset;
+	top_right = camera_position + offset;
+
+	/*Left section index*/
+	minX = 0;
+	while(bottom_left.x > point_sections_origins[minX][0].x)
 	{
-		int offset = x * stride_x + (y + i) * point_buffer_resolution.x * stride_x;
-		memcpy(h_point_buffer + i * point_buffer_resolution.x, point_sections[0] + offset, size);
+		minX++;
 	}
+	minX--;
 
-	/*Send gpu point buffer to the gpu*/
+	/*Right section index*/
+	maxX = 0;
+	while(top_right.x > point_sections_origins[maxX][0].x)
+	{
+		maxX++;
+	}
+	maxX--;
+
+	/*Top section index*/
+	maxY = 0;
+	while (top_right.z > point_sections_origins[0][maxY].y)
+	{
+		maxY++;
+	}
+	maxY--;
+
+	/*Bottom section index*/
+	minY = 0;
+	while (top_right.z > point_sections_origins[0][minY].y)
+	{
+		minY++;
+	}
+	minY--;
+
+
+	/*Copy the quad-trees into the point buffer*/
+	int i, j, start, end, row_offset_buffer, column_offset, row_offset_section, row_size;
+	column_offset = point_buffer_resolution.x * stride_x;
+	for(i = minX; i <= maxX; i++)
+	{
+		for(j = minY; j <= maxY; j++)
+		{
+
+			//TODO: calculate how many elements from each buffer is copied
+			row_offset_section = 10;
+			row_size = 10;
+			row_offset_buffer = 10;
+			end = 0;
+			start = 0;
+
+			/*Copy the data from the section*/
+			for(start; start <= end; start++) 
+				memcpy(h_point_buffer + start * column_offset + row_offset_buffer,
+					   point_sections[i][j] + column_offset + row_offset_section,
+					   sizeof(float) * row_size * stride_x);
+		}
+	}
+	
+
+	/*Send point buffer to the gpu*/
 	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
 }
 /*
@@ -532,7 +584,6 @@ void copyPointBuffer()
  * http://www.songho.ca/opengl/gl_pbo.html
  *
  */
- // Setup Texture
 void setupTexture()
 {
 	// Generate a buffer ID
@@ -570,7 +621,6 @@ void setupTexture()
 //============================
 //		OPENGL FUNCTIONS
 //============================
-
 /*
  * Update the texture with raytracing data from the GPU
  */
