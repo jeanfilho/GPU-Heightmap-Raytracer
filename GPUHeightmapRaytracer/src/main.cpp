@@ -68,12 +68,14 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-glm::ivec2 point_buffer_resolution = glm::ivec2(512, 512);
+glm::ivec2 point_buffer_resolution(512, 512);
 
-// CPU-Side point grid
-const int cpu_point_section_size = 4;
-float* cpu_point_section[cpu_point_section_size][cpu_point_section_size];
-glm::vec2 point_section_origin[cpu_point_section_size][cpu_point_section_size];
+// CPU-Side point sections
+const int point_sections_size = 4;
+std::thread* thread_pool[point_sections_size][point_sections_size];
+bool thread_exit[point_sections_size][point_sections_size];
+float* point_sections[point_sections_size][point_sections_size];
+glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec2 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
@@ -178,8 +180,15 @@ bool loadJPEG(std::string filename)
 	
 	return true;
 }
+
+
+//============================
+//		LAS FUNCTIONS
+//============================
+
 /*
  * Read LAS header before starting the ray tracing and collect necessary information
+ * Set the camera position to the center of the point cloud
  * Source: http://www.liblas.org/tutorial/cpp.html
  */
 void readLASHeader(std::string filename)
@@ -227,7 +236,7 @@ void readLASHeader(std::string filename)
 * Load points using libLas Library in LAS format
 * Source: http://www.liblas.org/tutorial/cpp.html
 */
-void loadPointDataLASToGrid(std::string filename, float *grid_section)
+void loadPointDataLASToGrid(std::string filename, glm::ivec2 section_position)
 {
 	/*Create input stream and associate it with .las file opened to read in binary mode*/
 	std::ifstream ifs;
@@ -245,6 +254,11 @@ void loadPointDataLASToGrid(std::string filename, float *grid_section)
 	/*After the reader has been created, you can access members of the Public Header Block*/
 	liblas::Header const& header = reader.GetHeader();
 
+	/*Define grid boundaries*/
+	glm::vec2 lower_boundary, higher_boundary;
+	lower_boundary = point_sections_origins[section_position.x][section_position.y];
+	higher_boundary = point_sections_origins[section_position.x][section_position.y] + static_cast<float>(point_buffer_resolution.x) * cell_size;
+
 	/*Iterate through point records and calculate the height contribution to each neighboring grid cell*/
 	while (reader.ReadNextPoint())
 	{
@@ -254,12 +268,17 @@ void loadPointDataLASToGrid(std::string filename, float *grid_section)
 		unsigned int index[LOD_levels];
 		float fX, fY, fZ;
 
-		//TODO: check if point resides in grid or not -> grid must have boundaries defined (an origin)
 		fX = float(p.GetX() - header.GetMinX());
 		fY = float(p.GetY() - header.GetMinY());
 		fZ = float(p.GetZ() - header.GetMinZ());
-		x = static_cast<int>(glm::floor(fX / cell_size.x));
-		y = static_cast<int>(glm::floor(fY / cell_size.y));
+
+		/* Skip if the point is outside of the grid */
+		if (fX < lower_boundary.x || fX >= higher_boundary.x || fY < lower_boundary.y || fY >= higher_boundary.y)
+			continue;
+
+		/* Calculate point position in grid */
+		x = static_cast<int>(glm::floor((fX - point_sections_origins[section_position.x][section_position.y].x) / cell_size.x));
+		y = static_cast<int>(glm::floor((fY - point_sections_origins[section_position.x][section_position.y].y) / cell_size.y));
 
 		/* Calculate offsets in grid */
 		temp_x = x / glm::pow(2, LOD_levels - 1);
@@ -272,15 +291,20 @@ void loadPointDataLASToGrid(std::string filename, float *grid_section)
 			index[i] = index[i + 1] + 1 + (temp_x * (static_cast<int>(glm::pow(4, i - 1)) + 1) + temp_y * 2 * static_cast<int>(glm::pow(4, i - 1)) + 1);
 		}
 
+		/* Break the loop if the thread must be terminated */
+		if (thread_exit[section_position.x][section_position.y])
+			break;
+
+		/*Insert the highest values from finest to coarsest level of the Quad-tree*/
 		for (int i = 0; i < LOD_levels; i++)
 		{
-
-			if (grid_section[index[i]] <= fZ)
-				grid_section[index[i]] = fZ;
+			if (*(point_sections[section_position.x][section_position.y] + index[i]) <= fZ)
+				*(point_sections[section_position.x][section_position.y] + index[i]) = fZ;
 			else
 				break;
 		}
 
+		/*Set the highest value to visualize it later*/
 		if (max_height < fZ && fZ - max_height < height_tolerance)
 		{
 			max_height = fZ;
@@ -291,27 +315,214 @@ void loadPointDataLASToGrid(std::string filename, float *grid_section)
 	ifs.close();
 }
 
+
+//============================
+//		SECTION AND GRID
+//          FUNCTIONS
+//============================
+
 /*
  * Allocate a grid section for the out-of-core functionality
  * The quad-tree piramid is allocate contiguously to facilitate the copy of a section
  */
-void allocateGridSection(glm::ivec2 pos)
+void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 {
-	if(cpu_point_section[pos.x][pos.y] != NULL)
-	{
-		delete[] cpu_point_section[pos.x][pos.y];
-	}
-	cpu_point_section[pos.x][pos.y] = new float[sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * (glm::pow(4, LOD_levels-1) + 1)]();
-	std::thread t(loadPointDataLASToGrid, point_cloud_file, cpu_point_section[pos.x][pos.y]);
-	t.detach();
+	point_sections_origins[pos.x][pos.y] = origin;
+	point_sections[pos.x][pos.y] = new float[sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * (glm::pow(4, LOD_levels-1) + 1)]();
+	thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToGrid, point_cloud_file, point_sections[pos.x][pos.y]);;
 }
 
-/**/
+/* 
+ * Spawn threads at the initialization phase to start loading points 
+ * The camera starts at the center of the sections grid (readLASHeader() must be called before this function)
+ */
 void initializeSections()
 {
-	//TODO: implement
+	for(int i = 0; i < point_sections_size; i++)
+	{
+		for (int j = 0; j < point_sections_size; j++)
+		{
+			allocateSection(glm::ivec2(i, j),
+				glm::vec2(camera_position.x, camera_position.y) -
+				glm::vec2((i - static_cast<float>(point_sections_size) / 2.0f) * cell_size.x * static_cast<float>(point_buffer_resolution.x),
+						  (j - static_cast<float>(point_sections_size) / 2.0f) * cell_size.y * static_cast<float>(point_buffer_resolution.y)));
+		}
+	}
+
 }
 
+/*
+ * Helper function for manageSections
+ */
+void unloadSectionsColumn(int column)
+{
+	for(int i = 0; i < point_sections_size; i++)
+	{
+		if (thread_pool[column][i]->joinable())
+		{
+			thread_exit[column][i] = true;
+			thread_pool[column][i]->join();
+			delete thread_pool[column][i];
+			thread_exit[column][i] = false;
+		}
+		delete[]point_sections[column][i];
+	}
+}
+
+
+/*
+* Helper function for manageSections
+*/
+void unloadSectionsRow(int row)
+{
+	for (int i = 0; i < point_sections_size; i++)
+	{
+		if (thread_pool[i][row]->joinable())
+		{
+			thread_exit[i][row] = true;
+			thread_pool[i][row]->join();
+			delete thread_pool[i][row];
+			thread_exit[i][row] = false;
+		}
+		delete[]point_sections[i][row];
+	}
+}
+
+/*
+* Move sections X cells horizontally
+* + is RIGHT
+*/
+void rearrangeSectionsX(int x)
+{
+	int i, j;
+	if (x >= 0)
+	{
+		for (i = point_sections_size - 1; i >= x; i--)
+			for (j = 0; j < point_sections_size; j++)
+			{
+				point_sections[i][j] = point_sections[i - x][j];
+				point_sections_origins[i][j] = point_sections_origins[i - x][j];
+				thread_pool[i][j] = thread_pool[i - x][j];
+			}
+	}
+	else
+	{
+		for (i = 0; i < point_sections_size - x; i++)
+			for (j = 0; j < point_sections_size; j++)
+			{
+				point_sections[i][j] = point_sections[i - x][j];
+				point_sections_origins[i][j] = point_sections_origins[i - x][j];
+				thread_pool[i][j] = thread_pool[i - x][j];
+			}
+	}
+}
+
+/*
+* Move sections Y cells horizontally
+* + is DOWN
+*/
+void rearrangeSectionsY(int y)
+{
+	int i, j;
+	if (y >= 0)
+	{
+		for (i = 0; i < point_sections_size; i++)
+			for (j = point_sections_size - 1; j >= y; j--)
+			{
+				point_sections[i][j] = point_sections[i][j - y];
+				point_sections_origins[i][j] = point_sections_origins[i][j - y];
+				thread_pool[i][j] = thread_pool[i][j - y];
+			}
+	}
+	else
+	{
+		for (i = 0; i < point_sections_size; i++)
+			for (j = 0; j < point_sections_size - y; j++)
+			{
+				point_sections[i][j] = point_sections[i][j - y];
+				point_sections_origins[i][j] = point_sections_origins[i][j - y];
+				thread_pool[i][j] = thread_pool[i][j - y];
+			}
+	}
+}
+
+/* 
+ * Based on camera position, load and unload point sections
+ * If the camera's grid is less than the set distance to a border, rearrange the grid
+ */
+void manageSections()
+{
+	float distance;
+	distance = static_cast<float>(point_buffer_resolution.x) * cell_size.x;
+
+	/*Allocate left - move sections right*/
+	if (camera_position.x < point_sections_origins[0][0].x + distance)
+	{
+		unloadSectionsColumn(point_sections_size - 1);
+		rearrangeSectionsX(1);
+		for (int i = 0; i < point_sections_size; i++)
+			allocateSection(glm::ivec2(0, i),
+				point_sections_origins[1][i] - glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x);
+	}
+
+	/*Allocate right - Move sections left*/
+	if (camera_position.x >= point_sections_origins[point_sections_size - 1][point_sections_size - 1].x + distance)
+	{
+		unloadSectionsColumn(0);
+		rearrangeSectionsX(-1);
+		for (int i = 0; i < point_sections_size; i++)
+			allocateSection(glm::ivec2(point_sections_size - 1, i),
+				point_sections_origins[point_sections_size - 2][i] + glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x);
+	}
+
+	/*Allocate up - move sections down*/
+	if (camera_position.y < point_sections_origins[0][0].y + distance)
+	{
+		unloadSectionsRow(0);
+		rearrangeSectionsY(-1);
+		for (int i = 0; i < point_sections_size; i++)
+			allocateSection(glm::ivec2(i, point_sections_size - 1),
+				point_sections_origins[i][point_sections_size - 2] + glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y);
+	}
+
+	/*Allocate down - move sections up*/
+	if (camera_position.y >= point_sections_origins[point_sections_size - 1][point_sections_size - 1].y + distance)
+	{
+		unloadSectionsRow(point_sections_size - 1);
+		rearrangeSectionsY(1);
+		for (int i = 0; i < point_sections_size; i++)
+			allocateSection(glm::ivec2(i, 0),
+				point_sections_origins[i][1] - glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y);
+	}
+}
+
+
+/*
+* Set up CPU-Side buffer that is going to be transferred over to the GPU
+*
+* NOTE: it is more efficient to pre-allocate the point
+* buffer in the RAM and then pass it to the GPU
+* than passing every line at a time
+*
+*/
+void copyPointBuffer()
+{
+	//TODO: implement new copying between sections
+
+	/*Copies a portion of the grid to raytrace in the gpu*/
+	int x, y;
+	x = static_cast<int>(floor(camera_position.x - point_buffer_resolution.x / 2 * cell_size.x));
+	y = static_cast<int>(floor(camera_position.z - point_buffer_resolution.y / 2 * cell_size.y));
+	int size = sizeof(float) * point_buffer_resolution.x;
+	for (int i = 0; i < point_buffer_resolution.y; i++)
+	{
+		int offset = x * stride_x + (y + i) * point_buffer_resolution.x * stride_x;
+		memcpy(h_point_buffer + i * point_buffer_resolution.x, point_sections[0] + offset, size);
+	}
+
+	/*Send gpu point buffer to the gpu*/
+	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
+}
 /*
  * This method sets up a texture object and its respective buffers to share with CUDA device
  *
@@ -354,6 +565,11 @@ void setupTexture()
 	glBindTexture(GL_TEXTURE_RECTANGLE, 0);
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 }
+
+
+//============================
+//		OPENGL FUNCTIONS
+//============================
 
 /*
  * Update the texture with raytracing data from the GPU
@@ -427,32 +643,10 @@ void renderTexture()
 	glMatrixMode(GL_MODELVIEW);
 }
 
-/*
-* Set up CPU-Side buffer that is going to be transferred over to the GPU
-* 
-* NOTE: it is more efficient to pre-allocate the point
-* buffer in the RAM and then pass it to the GPU
-* than passing every line at a time 
-* 
-* 
-*/
-void copyPointBuffer()
-{
-	//TODO: implement new copying between sections
-	/*Copies a portion of the grid to raytrace in the gpu*/
-	int x, y;
-	x = static_cast<int>(floor(camera_position.x - point_buffer_resolution.x / 2 * cell_size.x)) ;
-	y = static_cast<int>(floor(camera_position.z - point_buffer_resolution.y / 2 * cell_size.y)) ;
-	int size = sizeof(float) * point_buffer_resolution.x;
-	for (int i = 0; i < point_buffer_resolution.y; i++)
-	{
-		int offset = x * stride_x + (y + i) * point_buffer_resolution.x * stride_x;
-		memcpy(h_point_buffer + i * point_buffer_resolution.x, cpu_point_section[0] + offset, size);
-	}
 
-	/*Send gpu point buffer to the gpu*/
-	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
-}
+//============================
+//		CAMERA FUNCTIONS
+//============================
 
 /*
  *Handle the camera movement
@@ -651,6 +845,7 @@ void draw()
 
 	moveCamera();
 	rotateCamera();
+	manageSections();
 
 	/* render the scene here */
 	copyPointBuffer();
@@ -695,6 +890,7 @@ void initialize()
 	setupTexture();
 	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y));
+	initializeSections();
 	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size);
 }
 
@@ -704,9 +900,13 @@ void freeResourcers()
 	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaFree(d_point_buffer));
 	checkCudaErrors(cudaFree(d_color_map));
+	CudaSpace::freeDeviceVariables();
 	delete[](h_color_map);
 	delete[](h_point_buffer);
-	CudaSpace::freeDeviceVariables();
+	delete[](thread_pool);
+	for each(float* ptr in point_sections)
+		delete[] ptr;
+	
 }
 
 
