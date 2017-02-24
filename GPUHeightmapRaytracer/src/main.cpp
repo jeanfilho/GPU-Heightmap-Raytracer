@@ -80,7 +80,7 @@ glm::vec2 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
 const int LOD_levels = 4;
-const int stride_x = glm::pow(4, LOD_levels - 1) + 1; // Number of elements per Quad-tree root
+const int stride_x = static_cast<int>(glm::pow(4, LOD_levels - 1)) + 1; // Number of elements per Quad-tree root
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -281,8 +281,8 @@ void loadPointDataLASToGrid(std::string filename, glm::ivec2 section_position)
 		y = static_cast<int>(glm::floor((fY - point_sections_origins[section_position.x][section_position.y].y) / cell_size.y));
 
 		/* Calculate offsets in grid */
-		temp_x = x / glm::pow(2, LOD_levels - 1);
-		temp_y = y / glm::pow(2, LOD_levels - 1);
+		temp_x = x / static_cast<int>(glm::pow(2, LOD_levels - 1));
+		temp_y = y / static_cast<int>(glm::pow(2, LOD_levels - 1));
 		index[LOD_levels - 1] = temp_x * stride_x + temp_y * point_buffer_resolution.x * stride_x;
 		for (int i = LOD_levels - 2; i >= 0; i--)
 		{
@@ -328,8 +328,8 @@ void loadPointDataLASToGrid(std::string filename, glm::ivec2 section_position)
 void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 {
 	point_sections_origins[pos.x][pos.y] = origin;
-	point_sections[pos.x][pos.y] = new float[sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * (glm::pow(4, LOD_levels-1) + 1)]();
-	thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToGrid, point_cloud_file, point_sections[pos.x][pos.y]);;
+	point_sections[pos.x][pos.y] = new float[sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * (static_cast<int>(glm::pow(4, LOD_levels-1) + 1))]();
+	thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToGrid, point_cloud_file, pos);;
 }
 
 /* 
@@ -513,7 +513,7 @@ void copyPointBuffer()
 	/*Set the corners of the point buffer*/
 	offset = glm::vec3(cell_size.x * point_buffer_resolution.x / 2.0f, 0, cell_size.y * point_buffer_resolution.y / 2.0f);
 	bottom_left = camera_position - offset;
-	top_right = camera_position + offset;
+	top_right = camera_position + offset - glm::vec3(FLT_MIN, 0, FLT_MIN); //subtract an amount in case the camera is at the center of a grid 
 
 	/*Left section index*/
 	minX = 0;
@@ -548,29 +548,61 @@ void copyPointBuffer()
 	minY--;
 
 
-	/*Copy the quad-trees into the point buffer*/
-	int i, j, start, end, row_offset_buffer, column_offset, row_offset_section, row_size;
-	column_offset = point_buffer_resolution.x * stride_x;
-	for(i = minX; i <= maxX; i++)
+	/*Copy the quad-trees into the point buffer, start with lower left corner and proceed row-wise */
+	glm::ivec2 cell_position, section_position;
+	int row_index, row_offset;
+
+	/*Cell position at lower left section*/
+	section_position = bottom_left - glm::vec3(point_sections_origins[minX][minY].x, 0, point_sections_origins[minX][minY].y);
+	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / cell_size.x)), static_cast<int>(glm::floor(section_position.y / cell_size.y)));
+
+	/*Copy the data from the lower left section*/
+	row_offset = 0;
+	for (row_index = cell_position.y; row_index < point_buffer_resolution.y; row_index++)
 	{
-		for(j = minY; j <= maxY; j++)
-		{
+		memcpy(h_point_buffer + row_offset * stride_x * point_buffer_resolution.x,
+			point_sections[minX][minY] + cell_position.x * stride_x + row_index * point_buffer_resolution.x * stride_x,
+			sizeof(float) * stride_x * (point_buffer_resolution.x - cell_position.x));
 
-			//TODO: calculate how many elements from each buffer is copied
-			row_offset_section = 10;
-			row_size = 10;
-			row_offset_buffer = 10;
-			end = 0;
-			start = 0;
-
-			/*Copy the data from the section*/
-			for(start; start <= end; start++) 
-				memcpy(h_point_buffer + start * column_offset + row_offset_buffer,
-					   point_sections[i][j] + column_offset + row_offset_section,
-					   sizeof(float) * row_size * stride_x);
-		}
+		row_offset++;
 	}
-	
+
+	/*Copy the data from the bottom right section*/
+	row_offset = 0;
+	row_index = cell_position.x == 0 ? point_buffer_resolution.y : cell_position.y;
+	for (row_index; row_index < point_buffer_resolution.y; row_index++)
+	{
+		memcpy(h_point_buffer + (point_buffer_resolution.x - cell_position.x) * stride_x + row_offset * stride_x * point_buffer_resolution.x,
+			point_sections[maxX][minY] + row_index * point_buffer_resolution.x * stride_x,
+			sizeof(float) * stride_x * cell_position.x);
+
+		row_offset++;
+	}
+
+	/*Copy the data from top left section */
+	row_offset = 0;
+	row_index = cell_position.y == 0 ? cell_position.y : 0;
+	for (row_index; row_index < cell_position.y; row_index++)
+	{
+		memcpy(h_point_buffer + row_index * stride_x * point_buffer_resolution.x,
+			point_sections[minX][maxY] + cell_position.x * stride_x + row_offset * stride_x * point_buffer_resolution.x,
+			sizeof(float) * stride_x * (point_buffer_resolution.x - cell_position.x));
+
+		row_offset++;
+	}
+
+	/*Copy the data from top right section*/
+	row_offset = 0;
+	row_index = cell_position.y == 0 || cell_position.x == 0 ? cell_position.y : 0;
+	for (row_index; row_index < cell_position.y; row_index++)
+	{
+		memcpy(h_point_buffer + (point_buffer_resolution.x - cell_position.x) * stride_x + row_index * stride_x * point_buffer_resolution.x,
+			point_sections[minX][maxY] + row_offset * stride_x * point_buffer_resolution.x,
+			sizeof(float) * stride_x * cell_position.x);
+
+		row_offset++;
+	}
+
 
 	/*Send point buffer to the gpu*/
 	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
@@ -953,7 +985,8 @@ void freeResourcers()
 	CudaSpace::freeDeviceVariables();
 	delete[](h_color_map);
 	delete[](h_point_buffer);
-	delete[](thread_pool);
+	for each(std::thread* ptr in thread_pool)
+		delete ptr;
 	for each(float* ptr in point_sections)
 		delete[] ptr;
 	
