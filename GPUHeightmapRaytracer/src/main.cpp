@@ -414,7 +414,7 @@ void rearrangeSectionsX(int x)
 	}
 	else
 	{
-		for (i = 0; i < point_sections_size - x; i++)
+		for (i = 0; i < point_sections_size + x; i++)
 			for (j = 0; j < point_sections_size; j++)
 			{
 				point_sections[i][j] = point_sections[i - x][j];
@@ -459,11 +459,8 @@ void rearrangeSectionsY(int y)
  */
 void manageSections()
 {
-	float distance;
-	distance = static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels - 1);
-
 	/*Allocate left - move sections right*/
-	if (camera_position.x < point_sections_origins[0][0].x + distance)
+	if (camera_position.x < point_sections_origins[1][0].x)
 	{
 		unloadSectionsColumn(point_sections_size - 1);
 		rearrangeSectionsX(1);
@@ -473,7 +470,7 @@ void manageSections()
 	}
 
 	/*Allocate right - Move sections left*/
-	if (camera_position.x >= point_sections_origins[point_sections_size - 1][point_sections_size - 1].x + distance)
+	if (camera_position.x >= point_sections_origins[point_sections_size - 1][point_sections_size - 1].x)
 	{
 		unloadSectionsColumn(0);
 		rearrangeSectionsX(-1);
@@ -483,7 +480,7 @@ void manageSections()
 	}
 
 	/*Allocate up - move sections down*/
-	if (camera_position.z < point_sections_origins[0][0].y + distance)
+	if (camera_position.z < point_sections_origins[0][0].y)
 	{
 		unloadSectionsRow(0);
 		rearrangeSectionsY(-1);
@@ -493,7 +490,7 @@ void manageSections()
 	}
 
 	/*Allocate down - move sections up*/
-	if (camera_position.z >= point_sections_origins[point_sections_size - 1][point_sections_size - 1].y + distance)
+	if (camera_position.z >= point_sections_origins[point_sections_size - 1][point_sections_size - 1].y)
 	{
 		unloadSectionsRow(point_sections_size - 1);
 		rearrangeSectionsY(1);
@@ -556,8 +553,6 @@ void copyPointBuffer()
 		maxY++;
 	}
 	maxY--;
-
-	std::cout << minX << "," << minY << " to " << maxX << "," << maxY << std::endl;
 
 	/*Copy the quad-trees into the point buffer, start with lower left corner and proceed row-wise */
 	glm::vec2 section_position;
@@ -747,7 +742,8 @@ void renderTexture()
  */
 void moveCamera()
 {
-	camera_position += delta_time.count() * (glm::vec3(0, movement_up, 0) + glm::normalize(glm::vec3(camera_forward.x, 0, camera_forward.z)) * movement_fwd + glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0))) * movement_rht);
+	float factor = delta_time.count() > 1 ? 1 : delta_time.count();
+	camera_position += factor * (glm::vec3(0, movement_up, 0) + glm::normalize(glm::vec3(camera_forward.x, 0, camera_forward.z)) * movement_fwd + glm::normalize(glm::cross(camera_forward, glm::vec3(0, 1, 0))) * movement_rht);
 	
 	if (camera_position.x < 0)
 		camera_position.x = 0;
@@ -936,6 +932,7 @@ void draw()
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 
+	drawFPS();
 	moveCamera();
 	rotateCamera();
 	manageSections();
@@ -944,8 +941,6 @@ void draw()
 	copyPointBuffer();
 	updateTexture();
 	renderTexture();
-
-	drawFPS();
 
 	glFlush();
 	glutSwapBuffers();
