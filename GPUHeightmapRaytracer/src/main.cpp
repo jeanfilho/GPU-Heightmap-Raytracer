@@ -80,8 +80,8 @@ glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec2 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
-const int LOD_levels = 4;
-const int stride_x = static_cast<int>(glm::pow(4, LOD_levels - 1)) + 1; // Number of elements per Quad-tree root
+const int LOD_levels = 1;
+const int stride_x = LOD_levels == 1 ? 1 : static_cast<int>(glm::pow(4, LOD_levels - 1)) + 1; // Number of elements per Quad-tree root
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -527,7 +527,7 @@ void copyPointBuffer()
 
 	/*Left section index*/
 	minX = 0;
-	while(bottom_left.x > point_sections_origins[minX][0].x)
+	while(bottom_left.x > point_sections_origins[minX][0].x && minX < point_sections_size)
 	{
 		minX++;
 	}
@@ -535,7 +535,7 @@ void copyPointBuffer()
 
 	/*Bottom section index*/
 	minY = 0;
-	while (bottom_left.y > point_sections_origins[0][minY].y)
+	while (bottom_left.y > point_sections_origins[0][minY].y && minY < point_sections_size)
 	{
 		minY++;
 	}
@@ -543,7 +543,7 @@ void copyPointBuffer()
 
 	/*Right section index*/
 	maxX = 0;
-	while(top_right.x > point_sections_origins[maxX][0].x)
+	while(top_right.x > point_sections_origins[maxX][0].x && maxX < point_sections_size)
 	{
 		maxX++;
 	}
@@ -551,12 +551,13 @@ void copyPointBuffer()
 
 	/*Top section index*/
 	maxY = 0;
-	while (top_right.y > point_sections_origins[0][maxY].y)
+	while (top_right.y > point_sections_origins[0][maxY].y && maxY < point_sections_size)
 	{
 		maxY++;
 	}
 	maxY--;
 
+	std::cout << minX << "," << minY << " to " << maxX << "," << maxY << std::endl;
 
 	/*Copy the quad-trees into the point buffer, start with lower left corner and proceed row-wise */
 	glm::vec2 section_position;
@@ -595,7 +596,7 @@ void copyPointBuffer()
 	row_index = cell_position.y == 0 ? cell_position.y : 0;
 	for (row_index; row_index < cell_position.y; row_index++)
 	{
-		memcpy(h_point_buffer + row_index * stride_x * point_buffer_resolution.x,
+		memcpy(h_point_buffer + (row_index + point_buffer_resolution.y - cell_position.y) * stride_x * point_buffer_resolution.x,
 			point_sections[minX][maxY] + cell_position.x * stride_x + row_offset * stride_x * point_buffer_resolution.x,
 			sizeof(float) * stride_x * (point_buffer_resolution.x - cell_position.x));
 
@@ -607,8 +608,8 @@ void copyPointBuffer()
 	row_index = cell_position.y == 0 || cell_position.x == 0 ? cell_position.y : 0;
 	for (row_index; row_index < cell_position.y; row_index++)
 	{
-		memcpy(h_point_buffer + (point_buffer_resolution.x - cell_position.x) * stride_x + row_index * stride_x * point_buffer_resolution.x,
-			point_sections[minX][maxY] + row_offset * stride_x * point_buffer_resolution.x,
+		memcpy(h_point_buffer + (point_buffer_resolution.x - cell_position.x) * stride_x + (row_index + point_buffer_resolution.y - cell_position.y) * stride_x * point_buffer_resolution.x,
+			point_sections[maxX][maxY] + row_offset * stride_x * point_buffer_resolution.x,
 			sizeof(float) * stride_x * cell_position.x);
 
 		row_offset++;
@@ -762,7 +763,6 @@ void moveCamera()
 		camera_position.y = 0;
 	if (camera_position.y >= max_height * 4)
 		camera_position.y = max_height * 4;
-
 }
 /*
  * Handle camera rotation
