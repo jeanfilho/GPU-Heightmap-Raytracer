@@ -78,7 +78,7 @@ bool thread_exit[point_sections_size][point_sections_size];
 float* point_sections[point_sections_size][point_sections_size];
 glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec2 cell_size; //Cell size at the finest LOD level
-float max_height = FLT_MAX;
+float max_height = 0;
 float height_tolerance = 10;
 const int LOD_levels = 4;
 const int stride_x = static_cast<int>(glm::pow(4, LOD_levels - 1)) + 1; // Number of elements per Quad-tree root
@@ -258,7 +258,7 @@ void loadPointDataLASToSection(std::string filename, glm::ivec2 section_position
 	/*Define section boundaries*/
 	glm::vec2 lower_boundary, higher_boundary;
 	lower_boundary = point_sections_origins[section_position.x][section_position.y];
-	higher_boundary = point_sections_origins[section_position.x][section_position.y] + static_cast<float>(point_buffer_resolution.x) * (cell_size * glm::pow(2.0f, LOD_levels));
+	higher_boundary = point_sections_origins[section_position.x][section_position.y] + static_cast<float>(point_buffer_resolution.x) * (cell_size * glm::pow(2.0f, LOD_levels - 1));
 
 	/*Iterate through point records and calculate the height contribution to each neighboring grid cell*/
 	while (reader.ReadNextPoint())
@@ -274,12 +274,12 @@ void loadPointDataLASToSection(std::string filename, glm::ivec2 section_position
 		fZ = float(p.GetZ() - header.GetMinZ());
 
 		/* Skip if the point is outside of the section */
-		if (fX < lower_boundary.x || fX >= higher_boundary.x || fZ < lower_boundary.y || fZ >= higher_boundary.y)
+		if (fX < lower_boundary.x || fX >= higher_boundary.x || fY < lower_boundary.y || fY >= higher_boundary.y)
 			continue;
 
 		/* Calculate point position for the finest LOD in this section */
 		x = static_cast<int>(glm::floor((fX - point_sections_origins[section_position.x][section_position.y].x) / cell_size.x));
-		y = static_cast<int>(glm::floor((fZ - point_sections_origins[section_position.x][section_position.y].y) / cell_size.y));
+		y = static_cast<int>(glm::floor((fY - point_sections_origins[section_position.x][section_position.y].y) / cell_size.y));
 
 		/* Calculate LOD offsets in section */
 		temp_x = x / static_cast<int>(glm::pow(2, LOD_levels - 1));
@@ -351,8 +351,8 @@ void initializeSections()
 		{
 			allocateSection(glm::ivec2(i, j),
 				glm::vec2(camera_position.x, camera_position.z) +
-				glm::vec2((i - static_cast<float>(point_sections_size) / 2.0f) * cell_size.x * glm::pow(2.0f, LOD_levels) * static_cast<float>(point_buffer_resolution.x),
-						  (j - static_cast<float>(point_sections_size) / 2.0f) * cell_size.y * glm::pow(2.0f, LOD_levels) * static_cast<float>(point_buffer_resolution.y)));
+				glm::vec2((i - static_cast<float>(point_sections_size) / 2.0f) * cell_size.x * glm::pow(2.0f, LOD_levels - 1) * static_cast<float>(point_buffer_resolution.x),
+						  (j - static_cast<float>(point_sections_size) / 2.0f) * cell_size.y * glm::pow(2.0f, LOD_levels - 1) * static_cast<float>(point_buffer_resolution.y)));
 		}
 	}
 
@@ -460,7 +460,7 @@ void rearrangeSectionsY(int y)
 void manageSections()
 {
 	float distance;
-	distance = static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels);
+	distance = static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels - 1);
 
 	/*Allocate left - move sections right*/
 	if (camera_position.x < point_sections_origins[0][0].x + distance)
@@ -469,7 +469,7 @@ void manageSections()
 		rearrangeSectionsX(1);
 		for (int i = 0; i < point_sections_size; i++)
 			allocateSection(glm::ivec2(0, i),
-				point_sections_origins[1][i] - glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels));
+				point_sections_origins[1][i] - glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels - 1));
 	}
 
 	/*Allocate right - Move sections left*/
@@ -479,7 +479,7 @@ void manageSections()
 		rearrangeSectionsX(-1);
 		for (int i = 0; i < point_sections_size; i++)
 			allocateSection(glm::ivec2(point_sections_size - 1, i),
-				point_sections_origins[point_sections_size - 2][i] + glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels));
+				point_sections_origins[point_sections_size - 2][i] + glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels - 1));
 	}
 
 	/*Allocate up - move sections down*/
@@ -489,7 +489,7 @@ void manageSections()
 		rearrangeSectionsY(-1);
 		for (int i = 0; i < point_sections_size; i++)
 			allocateSection(glm::ivec2(i, point_sections_size - 1),
-				point_sections_origins[i][point_sections_size - 2] + glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y * glm::pow(2.0f, LOD_levels));
+				point_sections_origins[i][point_sections_size - 2] + glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y * glm::pow(2.0f, LOD_levels - 1));
 	}
 
 	/*Allocate down - move sections up*/
@@ -499,7 +499,7 @@ void manageSections()
 		rearrangeSectionsY(1);
 		for (int i = 0; i < point_sections_size; i++)
 			allocateSection(glm::ivec2(i, 0),
-				point_sections_origins[i][1] - glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y * glm::pow(2.0f, LOD_levels));
+				point_sections_origins[i][1] - glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y * glm::pow(2.0f, LOD_levels - 1));
 	}
 }
 
@@ -519,8 +519,8 @@ void copyPointBuffer()
 
 	/*Set the corners of the point buffer*/
 	offset =
-		glm::vec2(cell_size.x * glm::pow(2.0f, LOD_levels) * point_buffer_resolution.x / 2.0f,
-		cell_size.y * glm::pow(2.0f, LOD_levels) * point_buffer_resolution.y / 2.0f);
+		glm::vec2(cell_size.x * glm::pow(2.0f, LOD_levels - 1) * point_buffer_resolution.x / 2.0f,
+		cell_size.y * glm::pow(2.0f, LOD_levels - 1) * point_buffer_resolution.y / 2.0f);
 
 	bottom_left = glm::vec2(camera_position.x, camera_position.z) - offset;
 	top_right = glm::vec2(camera_position.x, camera_position.z) + offset - glm::vec2(FLT_MIN, FLT_MIN); //subtract an amount in case the camera is at the center of a grid 
@@ -565,7 +565,7 @@ void copyPointBuffer()
 
 	/*Cell position at lower left section*/
 	section_position = bottom_left - glm::vec2(point_sections_origins[minX][minY].x, point_sections_origins[minX][minY].y);
-	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / (cell_size.x * glm::pow(2.0f, LOD_levels)))), static_cast<int>(glm::floor(section_position.y / (cell_size.y * glm::pow(2.0f, LOD_levels)))));
+	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / (cell_size.x * glm::pow(2.0f, LOD_levels - 1)))), static_cast<int>(glm::floor(section_position.y / (cell_size.y * glm::pow(2.0f, LOD_levels - 1)))));
 
 	/*Copy the data from the lower left section*/
 	row_offset = 0;
