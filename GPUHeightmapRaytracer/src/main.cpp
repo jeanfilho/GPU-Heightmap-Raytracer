@@ -507,13 +507,16 @@ void manageSections()
 */
 void copyPointBuffer()
 {	
-	glm::vec3 bottom_left, top_right, offset;
+	glm::vec2 bottom_left, top_right, offset;
 	int minX, maxX, minY, maxY;
 
 	/*Set the corners of the point buffer*/
-	offset = glm::vec3(cell_size.x * glm::pow(2.0f, LOD_levels) * point_buffer_resolution.x / 2.0f, 0, cell_size.y * glm::pow(2.0f, LOD_levels) * point_buffer_resolution.y / 2.0f);
-	bottom_left = camera_position - offset;
-	top_right = camera_position + offset - glm::vec3(FLT_MIN, 0, FLT_MIN); //subtract an amount in case the camera is at the center of a grid 
+	offset =
+		glm::vec2(cell_size.x * glm::pow(2.0f, LOD_levels) * point_buffer_resolution.x / 2.0f,
+		cell_size.y * glm::pow(2.0f, LOD_levels) * point_buffer_resolution.y / 2.0f);
+
+	bottom_left = glm::vec2(camera_position.x, camera_position.z) - offset;
+	top_right = glm::vec2(camera_position.x, camera_position.z) + offset - glm::vec2(FLT_MIN, FLT_MIN); //subtract an amount in case the camera is at the center of a grid 
 
 	/*Left section index*/
 	minX = 0;
@@ -522,6 +525,14 @@ void copyPointBuffer()
 		minX++;
 	}
 	minX--;
+
+	/*Bottom section index*/
+	minY = 0;
+	while (bottom_left.y > point_sections_origins[0][minY].y)
+	{
+		minY++;
+	}
+	minY--;
 
 	/*Right section index*/
 	maxX = 0;
@@ -533,28 +544,20 @@ void copyPointBuffer()
 
 	/*Top section index*/
 	maxY = 0;
-	while (top_right.z > point_sections_origins[0][maxY].y)
+	while (top_right.y > point_sections_origins[0][maxY].y)
 	{
 		maxY++;
 	}
 	maxY--;
 
-	/*Bottom section index*/
-	minY = 0;
-	while (top_right.z > point_sections_origins[0][minY].y)
-	{
-		minY++;
-	}
-	minY--;
-
 
 	/*Copy the quad-trees into the point buffer, start with lower left corner and proceed row-wise */
-	glm::vec3 section_position;
+	glm::vec2 section_position;
 	glm::ivec2 cell_position;
 	int row_index, row_offset;
 
 	/*Cell position at lower left section*/
-	section_position = bottom_left - glm::vec3(point_sections_origins[minX][minY].x, 0, point_sections_origins[minX][minY].y);
+	section_position = bottom_left - glm::vec2(point_sections_origins[minX][minY].x, point_sections_origins[minX][minY].y);
 	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / (cell_size.x * glm::pow(2.0f, LOD_levels)))), static_cast<int>(glm::floor(section_position.y / (cell_size.y * glm::pow(2.0f, LOD_levels)))));
 
 	/*Copy the data from the lower left section*/
@@ -974,7 +977,7 @@ void initialize()
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
 	loadJPEG(color_map_file);
 	setupTexture();
-	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y];
+	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y * stride_x];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y));
 	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size);
 }
