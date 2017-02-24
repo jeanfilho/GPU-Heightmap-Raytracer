@@ -23,7 +23,6 @@
 #include <thread>
 #include <string>
 #include <chrono>
-#include <thread>
 
 #include <GL/glew.h>
 #include <GL/freeglut.h>
@@ -39,6 +38,8 @@
 
 #include "CudaKernel.cuh"
 #include "helper_cuda.h"
+
+#include <Windows.h>
 
 
 //============================
@@ -329,7 +330,13 @@ void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 {
 	point_sections_origins[pos.x][pos.y] = origin;
 	point_sections[pos.x][pos.y] = new float[sizeof(float) * stride_x * point_buffer_resolution.x * point_buffer_resolution.y]();
-	//thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToSection, point_cloud_file, pos);;
+	thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToSection, point_cloud_file, pos);
+
+	/* Set inner threads' priority higher than outers'*/
+	if(pos.x >= 1 && pos.x <=2 && pos.y >= 1 && pos.y <= 2)
+		SetThreadPriority(thread_pool[pos.x][pos.y]->native_handle(), 0);
+	else
+		SetThreadPriority(thread_pool[pos.x][pos.y]->native_handle(), -2);
 }
 
 /* 
@@ -1005,6 +1012,11 @@ void freeResourcers()
 /* initialize GLUT settings, register callbacks, enter main loop */
 int main(int argc, char** argv)
 {
+	/*
+	 *Set main thread priority higher to avoid not being executed for a long time
+	 *Source: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685100(v=vs.85).aspx
+	 */
+	SetThreadPriority(GetCurrentThread(), 2);
 	glutInit(&argc, argv);
 
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
