@@ -77,7 +77,7 @@ bool thread_exit[point_sections_size][point_sections_size];
 float* point_sections[point_sections_size][point_sections_size];
 glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec2 cell_size; //Cell size at the finest LOD level
-float max_height = 0;
+float max_height = FLT_MAX;
 float height_tolerance = 10;
 const int LOD_levels = 4;
 const int stride_x = static_cast<int>(glm::pow(4, LOD_levels - 1)) + 1; // Number of elements per Quad-tree root
@@ -218,12 +218,12 @@ void readLASHeader(std::string filename)
 	double deltaX, deltaY;
 	deltaX = header.GetMaxX() - header.GetMinX();
 	deltaY = header.GetMaxY() - header.GetMinY();
+	boundaries = glm::vec2(deltaX, deltaY);
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
 
 	/*Calculate area per point to set cell dimension*/
-	float point_area = float(deltaX * deltaY / header.GetPointRecordsCount());
-	cell_size.x = point_area;
-	cell_size.y = point_area;
+	float point_area = static_cast<float>(deltaX * deltaY / header.GetPointRecordsCount());
+	cell_size = glm::vec2(point_area, point_area);
 
 	/*Place the camera on the center of the point cloud*/
 	camera_position = glm::vec3(deltaX / 2, header.GetMaxZ() - header.GetMinZ(), deltaY/2);
@@ -236,7 +236,7 @@ void readLASHeader(std::string filename)
 * Load points using libLas Library in LAS format
 * Source: http://www.liblas.org/tutorial/cpp.html
 */
-void loadPointDataLASToGrid(std::string filename, glm::ivec2 section_position)
+void loadPointDataLASToSection(std::string filename, glm::ivec2 section_position)
 {
 	/*Create input stream and associate it with .las file opened to read in binary mode*/
 	std::ifstream ifs;
@@ -254,16 +254,16 @@ void loadPointDataLASToGrid(std::string filename, glm::ivec2 section_position)
 	/*After the reader has been created, you can access members of the Public Header Block*/
 	liblas::Header const& header = reader.GetHeader();
 
-	/*Define grid boundaries*/
+	/*Define section boundaries*/
 	glm::vec2 lower_boundary, higher_boundary;
 	lower_boundary = point_sections_origins[section_position.x][section_position.y];
-	higher_boundary = point_sections_origins[section_position.x][section_position.y] + static_cast<float>(point_buffer_resolution.x) * cell_size;
+	higher_boundary = point_sections_origins[section_position.x][section_position.y] + static_cast<float>(point_buffer_resolution.x) * (cell_size * glm::pow(2.0f, LOD_levels));
 
 	/*Iterate through point records and calculate the height contribution to each neighboring grid cell*/
 	while (reader.ReadNextPoint())
 	{
 		liblas::Point const& p = reader.GetPoint();
-		int x, y, // X and Y coordinates in the finest grid
+		int x, y, // X and Y coordinates in the finest LOD
 			temp_x, temp_y;
 		unsigned int index[LOD_levels];
 		float fX, fY, fZ;
@@ -272,15 +272,15 @@ void loadPointDataLASToGrid(std::string filename, glm::ivec2 section_position)
 		fY = float(p.GetY() - header.GetMinY());
 		fZ = float(p.GetZ() - header.GetMinZ());
 
-		/* Skip if the point is outside of the grid */
-		if (fX < lower_boundary.x || fX >= higher_boundary.x || fY < lower_boundary.y || fY >= higher_boundary.y)
+		/* Skip if the point is outside of the section */
+		if (fX < lower_boundary.x || fX >= higher_boundary.x || fZ < lower_boundary.y || fZ >= higher_boundary.y)
 			continue;
 
-		/* Calculate point position in grid */
+		/* Calculate point position for the finest LOD in this section */
 		x = static_cast<int>(glm::floor((fX - point_sections_origins[section_position.x][section_position.y].x) / cell_size.x));
-		y = static_cast<int>(glm::floor((fY - point_sections_origins[section_position.x][section_position.y].y) / cell_size.y));
+		y = static_cast<int>(glm::floor((fZ - point_sections_origins[section_position.x][section_position.y].y) / cell_size.y));
 
-		/* Calculate offsets in grid */
+		/* Calculate LOD offsets in section */
 		temp_x = x / static_cast<int>(glm::pow(2, LOD_levels - 1));
 		temp_y = y / static_cast<int>(glm::pow(2, LOD_levels - 1));
 		index[LOD_levels - 1] = temp_x * stride_x + temp_y * point_buffer_resolution.x * stride_x;
@@ -328,8 +328,8 @@ void loadPointDataLASToGrid(std::string filename, glm::ivec2 section_position)
 void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 {
 	point_sections_origins[pos.x][pos.y] = origin;
-	point_sections[pos.x][pos.y] = new float[sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * (static_cast<int>(glm::pow(4, LOD_levels-1) + 1))]();
-	thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToGrid, point_cloud_file, pos);;
+	point_sections[pos.x][pos.y] = new float[sizeof(float) * stride_x * point_buffer_resolution.x * point_buffer_resolution.y]();
+	//thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToSection, point_cloud_file, pos);;
 }
 
 /* 
@@ -343,9 +343,9 @@ void initializeSections()
 		for (int j = 0; j < point_sections_size; j++)
 		{
 			allocateSection(glm::ivec2(i, j),
-				glm::vec2(camera_position.x, camera_position.y) -
-				glm::vec2((i - static_cast<float>(point_sections_size) / 2.0f) * cell_size.x * static_cast<float>(point_buffer_resolution.x),
-						  (j - static_cast<float>(point_sections_size) / 2.0f) * cell_size.y * static_cast<float>(point_buffer_resolution.y)));
+				glm::vec2(camera_position.x, camera_position.z) +
+				glm::vec2((i - static_cast<float>(point_sections_size) / 2.0f) * cell_size.x * glm::pow(2.0f, LOD_levels) * static_cast<float>(point_buffer_resolution.x),
+						  (j - static_cast<float>(point_sections_size) / 2.0f) * cell_size.y * glm::pow(2.0f, LOD_levels) * static_cast<float>(point_buffer_resolution.y)));
 		}
 	}
 
@@ -453,7 +453,7 @@ void rearrangeSectionsY(int y)
 void manageSections()
 {
 	float distance;
-	distance = static_cast<float>(point_buffer_resolution.x) * cell_size.x;
+	distance = static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels);
 
 	/*Allocate left - move sections right*/
 	if (camera_position.x < point_sections_origins[0][0].x + distance)
@@ -462,7 +462,7 @@ void manageSections()
 		rearrangeSectionsX(1);
 		for (int i = 0; i < point_sections_size; i++)
 			allocateSection(glm::ivec2(0, i),
-				point_sections_origins[1][i] - glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x);
+				point_sections_origins[1][i] - glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels));
 	}
 
 	/*Allocate right - Move sections left*/
@@ -472,27 +472,27 @@ void manageSections()
 		rearrangeSectionsX(-1);
 		for (int i = 0; i < point_sections_size; i++)
 			allocateSection(glm::ivec2(point_sections_size - 1, i),
-				point_sections_origins[point_sections_size - 2][i] + glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x);
+				point_sections_origins[point_sections_size - 2][i] + glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels));
 	}
 
 	/*Allocate up - move sections down*/
-	if (camera_position.y < point_sections_origins[0][0].y + distance)
+	if (camera_position.z < point_sections_origins[0][0].y + distance)
 	{
 		unloadSectionsRow(0);
 		rearrangeSectionsY(-1);
 		for (int i = 0; i < point_sections_size; i++)
 			allocateSection(glm::ivec2(i, point_sections_size - 1),
-				point_sections_origins[i][point_sections_size - 2] + glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y);
+				point_sections_origins[i][point_sections_size - 2] + glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y * glm::pow(2.0f, LOD_levels));
 	}
 
 	/*Allocate down - move sections up*/
-	if (camera_position.y >= point_sections_origins[point_sections_size - 1][point_sections_size - 1].y + distance)
+	if (camera_position.z >= point_sections_origins[point_sections_size - 1][point_sections_size - 1].y + distance)
 	{
 		unloadSectionsRow(point_sections_size - 1);
 		rearrangeSectionsY(1);
 		for (int i = 0; i < point_sections_size; i++)
 			allocateSection(glm::ivec2(i, 0),
-				point_sections_origins[i][1] - glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y);
+				point_sections_origins[i][1] - glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y * glm::pow(2.0f, LOD_levels));
 	}
 }
 
@@ -511,7 +511,7 @@ void copyPointBuffer()
 	int minX, maxX, minY, maxY;
 
 	/*Set the corners of the point buffer*/
-	offset = glm::vec3(cell_size.x * point_buffer_resolution.x / 2.0f, 0, cell_size.y * point_buffer_resolution.y / 2.0f);
+	offset = glm::vec3(cell_size.x * glm::pow(2.0f, LOD_levels) * point_buffer_resolution.x / 2.0f, 0, cell_size.y * glm::pow(2.0f, LOD_levels) * point_buffer_resolution.y / 2.0f);
 	bottom_left = camera_position - offset;
 	top_right = camera_position + offset - glm::vec3(FLT_MIN, 0, FLT_MIN); //subtract an amount in case the camera is at the center of a grid 
 
@@ -549,12 +549,13 @@ void copyPointBuffer()
 
 
 	/*Copy the quad-trees into the point buffer, start with lower left corner and proceed row-wise */
-	glm::ivec2 cell_position, section_position;
+	glm::vec3 section_position;
+	glm::ivec2 cell_position;
 	int row_index, row_offset;
 
 	/*Cell position at lower left section*/
 	section_position = bottom_left - glm::vec3(point_sections_origins[minX][minY].x, 0, point_sections_origins[minX][minY].y);
-	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / cell_size.x)), static_cast<int>(glm::floor(section_position.y / cell_size.y)));
+	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / (cell_size.x * glm::pow(2.0f, LOD_levels)))), static_cast<int>(glm::floor(section_position.y / (cell_size.y * glm::pow(2.0f, LOD_levels)))));
 
 	/*Copy the data from the lower left section*/
 	row_offset = 0;
@@ -967,12 +968,14 @@ void initialize()
 {
 	glewInit();
 
+	readLASHeader(point_cloud_file);
+	initializeSections();
+
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
 	loadJPEG(color_map_file);
 	setupTexture();
 	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y));
-	initializeSections();
 	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size);
 }
 
