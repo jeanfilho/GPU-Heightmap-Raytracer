@@ -564,7 +564,7 @@ void copyPointBuffer()
 	int row_index, row_offset;
 
 	/*Cell position at lower left section*/
-	section_position = bottom_left - glm::vec2(point_sections_origins[minX][minY].x, point_sections_origins[minX][minY].y);
+	section_position = bottom_left - point_sections_origins[minX][minY];
 	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / (cell_size.x * glm::pow(2.0f, LOD_levels - 1)))), static_cast<int>(glm::floor(section_position.y / (cell_size.y * glm::pow(2.0f, LOD_levels - 1)))));
 
 	/*Copy the data from the lower left section*/
@@ -797,7 +797,7 @@ void drawFPS()
 	current_frame = sys_clock.now();
 	delta_time = current_frame - last_frame;
 	last_frame = current_frame;
-	std::string text = "FPS " + std::to_string(1 / delta_time.count());
+	std::string text = "FPS " + std::to_string(1 / delta_time.count()) + "| Camera Position: " + std::to_string(camera_position.x) + " " + std::to_string(camera_position.y) + " " + std::to_string(camera_position.z);
 	
 	for (int i = 0; i < text.length(); ++i) {
 		glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_10, text[i]);
