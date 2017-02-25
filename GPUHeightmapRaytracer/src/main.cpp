@@ -237,7 +237,7 @@ void readLASHeader(std::string filename)
 * Load points using libLas Library in LAS format
 * Source: http://www.liblas.org/tutorial/cpp.html
 */
-void loadPointDataLASToSection(std::string filename, glm::ivec2 section_position)
+void loadPointDataLASToSection(std::string filename, glm::vec2 origin, bool *exit_control, float *point_section)
 {
 	/*Create input stream and associate it with .las file opened to read in binary mode*/
 	std::ifstream ifs;
@@ -257,8 +257,8 @@ void loadPointDataLASToSection(std::string filename, glm::ivec2 section_position
 
 	/*Define section boundaries*/
 	glm::vec2 lower_boundary, higher_boundary;
-	lower_boundary = point_sections_origins[section_position.x][section_position.y];
-	higher_boundary = point_sections_origins[section_position.x][section_position.y] + static_cast<float>(point_buffer_resolution.x) * (cell_size * glm::pow(2.0f, LOD_levels - 1));
+	lower_boundary = origin;
+	higher_boundary = origin + static_cast<float>(point_buffer_resolution.x) * (cell_size * glm::pow(2.0f, LOD_levels - 1));
 
 	/*Iterate through point records and calculate the height contribution to each neighboring grid cell*/
 	while (reader.ReadNextPoint())
@@ -278,8 +278,8 @@ void loadPointDataLASToSection(std::string filename, glm::ivec2 section_position
 			continue;
 
 		/* Calculate point position for the finest LOD in this section */
-		x = static_cast<int>(glm::floor((fX - point_sections_origins[section_position.x][section_position.y].x) / cell_size.x));
-		y = static_cast<int>(glm::floor((fY - point_sections_origins[section_position.x][section_position.y].y) / cell_size.y));
+		x = static_cast<int>(glm::floor((fX - origin.x) / cell_size.x));
+		y = static_cast<int>(glm::floor((fY - origin.y) / cell_size.y));
 
 		/* Calculate LOD offsets in section */
 		temp_x = x / static_cast<int>(glm::pow(2, LOD_levels - 1));
@@ -293,20 +293,20 @@ void loadPointDataLASToSection(std::string filename, glm::ivec2 section_position
 		}
 
 		/* Break the loop if the thread must be terminated */
-		if (thread_exit[section_position.x][section_position.y])
+		if (*exit_control)
 			break;
 
 		/*Insert the highest values from finest to coarsest level of the Quad-tree*/
 		for (int i = 0; i < LOD_levels; i++)
 		{
-			if (*(point_sections[section_position.x][section_position.y] + index[i]) <= fZ)
-				*(point_sections[section_position.x][section_position.y] + index[i]) = fZ;
+			if (*(point_section + index[i]) <= fZ)
+				*(point_section + index[i]) = fZ;
 			else
 				break;
 		}
 
 		/*Set the highest value to visualize it later*/
-		if (max_height < fZ && fZ - max_height < height_tolerance)
+		if (max_height < fZ)
 		{
 			max_height = fZ;
 		}
@@ -330,7 +330,7 @@ void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 {
 	point_sections_origins[pos.x][pos.y] = origin;
 	point_sections[pos.x][pos.y] = new float[sizeof(float) * stride_x * point_buffer_resolution.x * point_buffer_resolution.y]();
-	thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToSection, point_cloud_file, pos);
+	thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToSection, point_cloud_file, origin, &thread_exit[pos.x][pos.y], point_sections[pos.x][pos.y]);
 
 	/* Set inner threads' priority higher than outers'*/
 	if(pos.x >= 1 && pos.x <=2 && pos.y >= 1 && pos.y <= 2)
@@ -425,7 +425,7 @@ void rearrangeSectionsX(int x)
 }
 
 /*
-* Move sections Y cells horizontally
+* Move sections Y cells vertically
 * + is DOWN
 */
 void rearrangeSectionsY(int y)
@@ -444,7 +444,7 @@ void rearrangeSectionsY(int y)
 	else
 	{
 		for (i = 0; i < point_sections_size; i++)
-			for (j = 0; j < point_sections_size - y; j++)
+			for (j = 0; j < point_sections_size + y; j++)
 			{
 				point_sections[i][j] = point_sections[i][j - y];
 				point_sections_origins[i][j] = point_sections_origins[i][j - y];
@@ -479,24 +479,24 @@ void manageSections()
 				point_sections_origins[point_sections_size - 2][i] + glm::vec2(1, 0) * static_cast<float>(point_buffer_resolution.x) * cell_size.x * glm::pow(2.0f, LOD_levels - 1));
 	}
 
-	/*Allocate up - move sections down*/
-	if (camera_position.z < point_sections_origins[0][0].y)
-	{
-		unloadSectionsRow(0);
-		rearrangeSectionsY(-1);
-		for (int i = 0; i < point_sections_size; i++)
-			allocateSection(glm::ivec2(i, point_sections_size - 1),
-				point_sections_origins[i][point_sections_size - 2] + glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y * glm::pow(2.0f, LOD_levels - 1));
-	}
-
 	/*Allocate down - move sections up*/
-	if (camera_position.z >= point_sections_origins[point_sections_size - 1][point_sections_size - 1].y)
+	if (camera_position.z < point_sections_origins[0][1].y)
 	{
 		unloadSectionsRow(point_sections_size - 1);
 		rearrangeSectionsY(1);
 		for (int i = 0; i < point_sections_size; i++)
 			allocateSection(glm::ivec2(i, 0),
 				point_sections_origins[i][1] - glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y * glm::pow(2.0f, LOD_levels - 1));
+	}
+
+	/*Allocate up - move sections down*/
+	if (camera_position.z >= point_sections_origins[0][point_sections_size - 1].y)
+	{
+		unloadSectionsRow(0);
+		rearrangeSectionsY(-1);
+		for (int i = 0; i < point_sections_size; i++)
+			allocateSection(glm::ivec2(i, point_sections_size - 1),
+				point_sections_origins[i][point_sections_size - 2] + glm::vec2(0, 1) * static_cast<float>(point_buffer_resolution.y) * cell_size.y * glm::pow(2.0f, LOD_levels - 1));
 	}
 }
 
@@ -932,7 +932,6 @@ void draw()
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 
-	drawFPS();
 	moveCamera();
 	rotateCamera();
 	manageSections();
@@ -941,6 +940,7 @@ void draw()
 	copyPointBuffer();
 	updateTexture();
 	renderTexture();
+	drawFPS();
 
 	glFlush();
 	glutSwapBuffers();
@@ -1011,7 +1011,6 @@ int main(int argc, char** argv)
 	 *Set main thread priority higher to avoid not being executed for a long time
 	 *Source: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685100(v=vs.85).aspx
 	 */
-	SetThreadPriority(GetCurrentThread(), 2);
 	glutInit(&argc, argv);
 
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
