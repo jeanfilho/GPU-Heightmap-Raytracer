@@ -1011,6 +1011,7 @@ int main(int argc, char** argv)
 	 *Set main thread priority higher to avoid not being executed for a long time
 	 *Source: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685100(v=vs.85).aspx
 	 */
+	SetThreadPriority(GetCurrentThread(), 4);
 	glutInit(&argc, argv);
 
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
