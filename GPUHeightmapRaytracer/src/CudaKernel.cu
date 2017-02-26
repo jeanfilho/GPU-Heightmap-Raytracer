@@ -94,6 +94,7 @@ namespace CudaSpace
 	 */
 	__device__ void updateParameters(float &tMax, int &pos, float ray_position, float ray_direction, float cell_size)
 	{
+		//TODO finish 
 		pos *= 2;
 		tMax = ((floor(ray_position / cell_size) + (ray_direction < 0 ? 0 : 1)) * cell_size - ray_position) / ray_direction;
 	}
@@ -104,8 +105,8 @@ namespace CudaSpace
 	__device__ float getPointBufferValue(int posX, int posZ, int LOD)
 	{
 		int index;
-
-		index = posX + point_buffer_resolution->x * stride_x * posZ;
+		//TODO calculate proper index for LOD
+		index = posX * stride_x + point_buffer_resolution->x * stride_x * posZ;
 
 		return point_buffer[index];
 	}
@@ -138,7 +139,7 @@ namespace CudaSpace
 			while ((ray_direction.y >= 0 ? ray_position_entry.y : ray_position_exit.y) <= height_value)
 			{
 				/*Step one LOD down*/
-				if (LOD > 1)
+				if (LOD > 0)
 				{
 					ray_position_entry += glm::max(0.0f, (height_value - ray_position_entry.y) / ray_direction.y) * ray_direction;
 
@@ -177,17 +178,18 @@ namespace CudaSpace
 			
 
 			/*Check if ray is outside of the grid/quadtree cell or going up after max_height is reached*/
-			if(LOD < LOD_levels - 2)
+			if(LOD < LOD_levels - 1)
 			{
 				/*Step one LOD up*/
-				if(true)
+				if(false)
 				{
 					LOD++;
 					updateParameters(tMaxX, posX, ray_position_exit.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
 					updateParameters(tMaxZ, posZ, ray_position_exit.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
 				}
 			}
-			else if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0 ||	ray_position_entry.y < 0 || ray_position_entry.y > max_height && ray_direction.y >= 0)
+			
+			if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0 ||	ray_position_entry.y < 0 || ray_position_entry.y > max_height && ray_direction.y >= 0)
 			{
 				return;
 			}

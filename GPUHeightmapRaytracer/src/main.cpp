@@ -54,7 +54,7 @@ std::string color_map_file = "autzen.jpg";
 glm::ivec2 texture_resolution(1920, 1080);
 glm::vec3
 	camera_position(0, 0, 0),
-	camera_forward(glm::normalize(glm::vec3(5, -.9, 0))),
+	camera_forward(glm::normalize(glm::vec3(0, -.9, .1))),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 glm::vec2 boundaries(0, 0);
 
@@ -284,14 +284,14 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		x = static_cast<int>(glm::floor((fX - origin.x) / cell_size.x));
 		y = static_cast<int>(glm::floor((fY - origin.y) / cell_size.y));
 
-		/* Calculate LOD offsets in section */
+		/* Calculate LOD offsets in section from the coarsest to the finest */
 		temp_x = x / static_cast<int>(glm::pow(2, LOD_levels - 1));
 		temp_y = y / static_cast<int>(glm::pow(2, LOD_levels - 1));
 		index[LOD_levels - 1] = temp_x * stride_x + temp_y * point_buffer_resolution.x * stride_x;
 		for (int i = LOD_levels - 2; i >= 0; i--)
 		{
 			temp_x = x % static_cast<int>(glm::pow(2, i + 1)) / static_cast<int>(glm::pow(2, i)); // results in either 0 or 1
-			temp_y = x % static_cast<int>(glm::pow(2, i + 1)) / static_cast<int>(glm::pow(2, i));
+			temp_y = y % static_cast<int>(glm::pow(2, i + 1)) / static_cast<int>(glm::pow(2, i));
 			index[i] = index[i + 1] + 1 + (temp_x * (static_cast<int>(glm::pow(4, i - 1)) + 1) + temp_y * 2 * static_cast<int>(glm::pow(4, i - 1)) + 1);
 		}
 
@@ -609,7 +609,7 @@ void copyPointBuffer()
 
 
 	/*Send point buffer to the gpu*/
-	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * stride_x * point_buffer_resolution.y , cudaMemcpyHostToDevice));
 }
 /*
  * This method sets up a texture object and its respective buffers to share with CUDA device
@@ -977,7 +977,7 @@ void initialize()
 	loadJPEG(color_map_file);
 	setupTexture();
 	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y * stride_x];
-	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y));
+	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * stride_x));
 	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size, LOD_levels, stride_x, max_height);
 }
 
