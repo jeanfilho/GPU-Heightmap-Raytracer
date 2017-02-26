@@ -237,7 +237,7 @@ void readLASHeader(std::string filename)
 * Load points using libLas Library in LAS format
 * Source: http://www.liblas.org/tutorial/cpp.html
 */
-void loadPointDataLASToSection(std::string filename, glm::vec2 origin, bool *exit_control, float *point_section)
+void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control, float *point_section)
 {
 	/*Create input stream and associate it with .las file opened to read in binary mode*/
 	std::ifstream ifs;
@@ -330,7 +330,7 @@ void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 {
 	point_sections_origins[pos.x][pos.y] = origin;
 	point_sections[pos.x][pos.y] = new float[sizeof(float) * stride_x * point_buffer_resolution.x * point_buffer_resolution.y]();
-	thread_pool[pos.x][pos.y] = new std::thread(loadPointDataLASToSection, point_cloud_file, origin, &thread_exit[pos.x][pos.y], point_sections[pos.x][pos.y]);
+	thread_pool[pos.x][pos.y] = new std::thread(loadLASToSection, point_cloud_file, origin, &thread_exit[pos.x][pos.y], point_sections[pos.x][pos.y]);
 
 	/* Set inner threads' priority higher than outers'*/
 	if(pos.x >= 1 && pos.x <=2 && pos.y >= 1 && pos.y <= 2)
@@ -674,7 +674,7 @@ void updateTexture()
 	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
 
 	//Call the wrapper function invoking the CUDA Kernel
-	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height, use_color_map, use_LOD);
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height, use_color_map);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
@@ -981,7 +981,7 @@ void initialize()
 	setupTexture();
 	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y * stride_x];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y));
-	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size);
+	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size, LOD_levels, stride_x);
 }
 
 /* Free Resources */
@@ -1011,7 +1011,7 @@ int main(int argc, char** argv)
 	 *Set main thread priority higher to avoid not being executed for a long time
 	 *Source: https://msdn.microsoft.com/en-us/library/windows/desktop/ms685100(v=vs.85).aspx
 	 */
-	SetThreadPriority(GetCurrentThread(), 4);
+	SetThreadPriority(GetCurrentThread(), 2);
 	glutInit(&argc, argv);
 
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
