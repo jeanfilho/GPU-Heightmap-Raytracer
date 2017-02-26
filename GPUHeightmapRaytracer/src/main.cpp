@@ -47,7 +47,7 @@
 //============================
 
 // Filenames
-std::string point_cloud_file = "points.las";
+std::string point_cloud_file = "autzen.las";
 std::string color_map_file = "autzen.jpg";
 
 // Camera related
@@ -80,7 +80,7 @@ glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec2 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
-const int LOD_levels = 1;
+const int LOD_levels = 2;
 const int stride_x = LOD_levels == 1 ? 1 : static_cast<int>(glm::pow(4, LOD_levels - 1)) + 1; // Number of elements per Quad-tree root
 
 // clock
@@ -227,7 +227,10 @@ void readLASHeader(std::string filename)
 	cell_size = glm::vec2(point_area, point_area);
 
 	/*Place the camera on the center of the point cloud*/
-	camera_position = glm::vec3(deltaX / 2, header.GetMaxZ() - header.GetMinZ(), deltaY/2);
+	camera_position = glm::vec3(deltaX / 2, header.GetMaxZ() - header.GetMinZ(), deltaY / 2);
+
+	/*Set max height for visualization*/
+	max_height = header.GetMaxZ() - header.GetMinZ();
 
 	/*Close the file stream*/
 	ifs.close();
@@ -303,12 +306,6 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 				*(point_section + index[i]) = fZ;
 			else
 				break;
-		}
-
-		/*Set the highest value to visualize it later*/
-		if (max_height < fZ)
-		{
-			max_height = fZ;
 		}
 	}
 
@@ -674,7 +671,7 @@ void updateTexture()
 	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
 
 	//Call the wrapper function invoking the CUDA Kernel
-	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, max_height, use_color_map);
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, use_color_map);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
@@ -981,7 +978,7 @@ void initialize()
 	setupTexture();
 	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y * stride_x];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y));
-	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size, LOD_levels, stride_x);
+	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size, LOD_levels, stride_x, max_height);
 }
 
 /* Free Resources */

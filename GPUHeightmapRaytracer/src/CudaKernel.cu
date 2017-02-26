@@ -92,9 +92,10 @@ namespace CudaSpace
 	/*
 	 * Update raytracing parameters accourdingly to the current LOD
 	 */
-	__device__ void updateParameters(float &tMax, float &tDelta, int &pos, float ray_position, float cell_size)
+	__device__ void updateParameters(float &tMax, int &pos, float ray_position, float ray_direction, float cell_size)
 	{
-		
+		pos *= 2;
+		tMax = ((floor(ray_position / cell_size) + (ray_direction < 0 ? 0 : 1)) * cell_size - ray_position) / ray_direction;
 	}
 
 	/*
@@ -123,28 +124,29 @@ namespace CudaSpace
 		char stepX, stepZ;
 		glm::vec3 ray_position_entry, ray_position_exit;
 
-		LOD = LOD_levels - 1;
+		LOD = 0;
 		setUpStartingParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
 		setUpStartingParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
-		
+
 		/*Loop the DDA algorithm*/
+		ray_position_entry = ray_origin;
+		ray_position_exit = ray_origin + ray_direction * (tMaxX < tMaxZ ? tMaxX : tMaxZ);
 		while(true)
 		{
-
-			ray_position_entry = ray_origin + ray_direction * (tMaxX < tMaxZ ? tMaxX : tMaxZ);
-			ray_position_exit = ray_origin + ray_direction * (tMaxX < tMaxZ ? tDeltaX + tMaxX : tDeltaZ + tMaxZ);
 			/*Check if ray intersects with back faces - Texel intersection from Dick, C., et al. (2009). GPU ray-casting for scalable terrain rendering. Proceedings of EUROGRAPHICS, Citeseer. Page */
 			height_value = getPointBufferValue(posX, posZ, LOD);
-			while (height_value >= (ray_direction.y >= 0 ? ray_position_exit.y : ray_position_entry.y))
+			while ((ray_direction.y >= 0 ? ray_position_entry.y : ray_position_exit.y) <= height_value)
 			{
 				/*Step one LOD down*/
-				if (LOD > 0)
+				if (LOD > 1)
 				{
 					ray_position_entry += glm::max(0.0f, (height_value - ray_position_entry.y) / ray_direction.y) * ray_direction;
 
 					LOD--;
-					updateParameters(tMaxX, tDeltaX, posX, ray_position_entry.x, cell_size->x * pow(2.0f, LOD));
-					updateParameters(tMaxZ, tDeltaZ, posZ, ray_position_entry.z, cell_size->y * pow(2.0f, LOD));
+					tDeltaX /= 2;
+					tDeltaZ /= 2;
+					updateParameters(tMaxX, posX, ray_position_entry.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
+					updateParameters(tMaxZ, posZ, ray_position_entry.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
 
 					ray_position_exit = ray_origin + ray_direction * (tMaxX < tMaxZ ? tMaxX : tMaxZ);
 					height_value = getPointBufferValue(posX, posZ, LOD);
@@ -160,6 +162,7 @@ namespace CudaSpace
 			}
 
 			/*Advance ray through the grid*/
+			ray_position_entry = ray_position_exit;
 			if(tMaxX < tMaxZ)
 			{
 				tMaxX += tDeltaX;
@@ -170,16 +173,18 @@ namespace CudaSpace
 				tMaxZ += tDeltaZ;
 				posZ += stepZ;
 			}
+			ray_position_exit = ray_origin + ray_direction * (tMaxX < tMaxZ ? tMaxX : tMaxZ); //Check where next step will be
+			
 
 			/*Check if ray is outside of the grid/quadtree cell or going up after max_height is reached*/
-			if(LOD < LOD_levels - 1)
+			if(LOD < LOD_levels - 2)
 			{
 				/*Step one LOD up*/
 				if(true)
 				{
 					LOD++;
-					setUpStartingParameters(tMaxX, tDeltaX, stepX, posX, ray_position_exit.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
-					setUpStartingParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_position_exit.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
+					updateParameters(tMaxX, posX, ray_position_exit.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
+					updateParameters(tMaxZ, posZ, ray_position_exit.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
 				}
 			}
 			else if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0 ||	ray_position_entry.y < 0 || ray_position_entry.y > max_height && ray_direction.y >= 0)
@@ -238,11 +243,10 @@ namespace CudaSpace
 	/*
 	* Set device parameters
 	*/
-	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos, float max_h, bool use_color)
+	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos, bool use_color)
 	{
 		*frame_dimension = frame_dim;
 		grid_camera_position->y = grid_camera_pos.y;
-		max_height = max_h;
 		use_color_map = use_color;
 
 		/*Basis change matrix from view to grid space*/
@@ -256,7 +260,7 @@ namespace CudaSpace
 	/* 
 	 * Initialize device 
 	 */
-	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_resolution, glm::ivec2 texture_resolution, float* point_buffer, unsigned char *color_map, glm::ivec2 color_map_resolution, glm::vec2 cell_size, int LOD_levels, int stride_x)
+	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_resolution, glm::ivec2 texture_resolution, float* point_buffer, unsigned char *color_map, glm::ivec2 color_map_resolution, glm::vec2 cell_size, int LOD_levels, int stride_x, float max_height)
 	{
 		CudaSpace::texture_resolution = new glm::ivec2();
 		CudaSpace::color_map_resolution = new glm::ivec2();
@@ -275,6 +279,7 @@ namespace CudaSpace
 		*CudaSpace::cell_size = cell_size;
 		CudaSpace::LOD_levels = LOD_levels;
 		CudaSpace::stride_x = stride_x;
+		CudaSpace::max_height = max_height;
 	}
 
 	/*
@@ -294,7 +299,7 @@ namespace CudaSpace
 	/*
 	 * Set grid and block dimensions, create LOD, pass parameters to device and call kernels
 	 */
-	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer, float max_height, bool use_color_map)
+	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer, bool use_color_map)
 	{
 		/*
 		 *  Things to consider:
@@ -305,7 +310,7 @@ namespace CudaSpace
 		dim3 gridSize, blockSize;
 
 		
-		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos, max_height, use_color_map);
+		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos, use_color_map);
 		checkCudaErrors(cudaDeviceSynchronize());
 		
 		blockSize = dim3(1, 1080/2);
@@ -318,9 +323,9 @@ namespace CudaSpace
 	/*
 	 * Initialize variables in the device
 	 */
-	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_res, glm::vec2& cell_size, int LOD_levels, int stride_x)
+	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_res, glm::vec2& cell_size, int LOD_levels, int stride_x, float max_height)
 	{
-		cuda_initializeDeviceVariables << <1, 1 >> > (point_buffer_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_res, cell_size, LOD_levels, stride_x);
+		cuda_initializeDeviceVariables << <1, 1 >> > (point_buffer_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_res, cell_size, LOD_levels, stride_x, max_height);
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
