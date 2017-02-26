@@ -54,7 +54,7 @@ std::string color_map_file = "autzen.jpg";
 glm::ivec2 texture_resolution(1920, 1080);
 glm::vec3
 	camera_position(0, 0, 0),
-	camera_forward(glm::normalize(glm::vec3(0, -.9, .1))),
+	camera_forward(glm::normalize(glm::vec3(0, -.9, 5))),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 glm::vec2 boundaries(0, 0);
 
@@ -69,7 +69,7 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-glm::ivec2 point_buffer_resolution(512, 512);
+glm::ivec2 point_buffer_resolution(256, 256);
 
 // CPU-Side point sections
 const int point_sections_size = 4;
@@ -80,7 +80,7 @@ glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec2 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
-const int LOD_levels = 2;
+const int LOD_levels = 5;
 const int stride_x = LOD_levels == 1 ? 1 : static_cast<int>(glm::pow(4, LOD_levels - 1)) + 1; // Number of elements per Quad-tree root
 
 // clock
@@ -230,7 +230,7 @@ void readLASHeader(std::string filename)
 	camera_position = glm::vec3(deltaX / 2, header.GetMaxZ() - header.GetMinZ(), deltaY / 2);
 
 	/*Set max height for visualization*/
-	max_height = header.GetMaxZ() - header.GetMinZ();
+	max_height = static_cast<float>(header.GetMaxZ() - header.GetMinZ());
 
 	/*Close the file stream*/
 	ifs.close();
@@ -507,7 +507,7 @@ void manageSections()
 *
 */
 void copyPointBuffer()
-{	
+{
 	glm::vec2 bottom_left, top_right, offset;
 	int minX, maxX, minY, maxY;
 
@@ -606,7 +606,6 @@ void copyPointBuffer()
 
 		row_offset++;
 	}
-
 
 	/*Send point buffer to the gpu*/
 	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * stride_x * point_buffer_resolution.y , cudaMemcpyHostToDevice));
@@ -976,7 +975,7 @@ void initialize()
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
 	loadJPEG(color_map_file);
 	setupTexture();
-	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y * stride_x];
+	checkCudaErrors(cudaMallocHost(&h_point_buffer, sizeof(float) *point_buffer_resolution.x * point_buffer_resolution.y * stride_x));
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * stride_x));
 	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size, LOD_levels, stride_x, max_height);
 }
@@ -987,9 +986,9 @@ void freeResourcers()
 	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaFree(d_point_buffer));
 	checkCudaErrors(cudaFree(d_color_map));
+	checkCudaErrors(cudaFreeHost(h_point_buffer));
 	CudaSpace::freeDeviceVariables();
 	delete[](h_color_map);
-	delete[](h_point_buffer);
 	for each(std::thread* ptr in thread_pool)
 		delete ptr;
 	for each(float* ptr in point_sections)

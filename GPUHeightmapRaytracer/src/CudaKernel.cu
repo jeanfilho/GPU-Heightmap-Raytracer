@@ -89,13 +89,14 @@ namespace CudaSpace
 		}
 	}
 
+
 	/*
 	 * Update raytracing parameters accourdingly to the current LOD
 	 */
-	__device__ void updateParameters(float &tMax, int &pos, float ray_position, float ray_direction, float cell_size)
+	__device__ void updateParameters(float &tMax, float &tDelta, int &pos, float ray_position, float ray_direction, float cell_size)
 	{
-		//TODO finish 
-		pos *= 2;
+		tDelta = (ray_direction < 0 ? -1 : 1) * cell_size / ray_direction;
+		pos = floor(ray_position / cell_size);
 		tMax = ((floor(ray_position / cell_size) + (ray_direction < 0 ? 0 : 1)) * cell_size - ray_position) / ray_direction;
 	}
 
@@ -111,6 +112,7 @@ namespace CudaSpace
 		return point_buffer[index];
 	}
 
+
 	/*
 	 *	Cast a ray through the grid {Amanatides, 1987 #22}
 	 *	ray_direction MUST be normalized
@@ -121,13 +123,16 @@ namespace CudaSpace
 	__device__ void castRay(glm::vec3& ray_origin, glm::vec3& ray_direction, glm::uvec3& result)
 	{
 		float tMaxX, tMaxZ, tDeltaX, tDeltaZ, height_value;
-		int posX, posZ, LOD;
+		int posX, posZ, high_x, high_z, low_x, low_z, LOD;
 		char stepX, stepZ;
 		glm::vec3 ray_position_entry, ray_position_exit;
 
 		LOD = 0;
 		setUpStartingParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
 		setUpStartingParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
+		low_z = low_x = 0;
+		high_x = point_buffer_resolution->x;
+		high_z = point_buffer_resolution->y;
 
 		/*Loop the DDA algorithm*/
 		ray_position_entry = ray_origin;
@@ -144,10 +149,12 @@ namespace CudaSpace
 					ray_position_entry += glm::max(0.0f, (height_value - ray_position_entry.y) / ray_direction.y) * ray_direction;
 
 					LOD--;
-					tDeltaX /= 2;
-					tDeltaZ /= 2;
-					updateParameters(tMaxX, posX, ray_position_entry.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
-					updateParameters(tMaxZ, posZ, ray_position_entry.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
+					low_x = posX * 2;
+					low_z = posZ * 2;
+					high_x = low_x + 2;
+					high_z = low_z + 2;
+					updateParameters(tMaxX, tDeltaX, posX, ray_position_entry.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
+					updateParameters(tMaxZ, tDeltaZ, posZ, ray_position_entry.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
 
 					ray_position_exit = ray_origin + ray_direction * (tMaxX < tMaxZ ? tMaxX : tMaxZ);
 					height_value = getPointBufferValue(posX, posZ, LOD);
@@ -178,18 +185,36 @@ namespace CudaSpace
 			
 
 			/*Check if ray is outside of the grid/quadtree cell or going up after max_height is reached*/
-			if(LOD < LOD_levels - 1)
+			if(posX >= high_x || posX < low_x || posZ >= high_z || posZ < low_z)
 			{
 				/*Step one LOD up*/
-				if(false)
+				if(LOD < LOD_levels - 1)
 				{
 					LOD++;
-					updateParameters(tMaxX, posX, ray_position_exit.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
-					updateParameters(tMaxZ, posZ, ray_position_exit.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
+					if (LOD < LOD_levels - 2)
+					{
+						low_x = posX / 2;
+						low_z = posZ / 2;
+						high_x = low_x + 2;
+						high_z = low_z + 2;
+					}
+					else
+					{
+						low_x = low_z = 0;
+						high_x = point_buffer_resolution->x;
+						high_z = point_buffer_resolution->y;
+					}
+					updateParameters(tMaxX, tDeltaX, posX, ray_position_exit.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
+					updateParameters(tMaxZ, tDeltaZ, posZ, ray_position_exit.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
+				}
+				else
+				{
+					return;
 				}
 			}
 			
-			if (posX >= point_buffer_resolution->x || posX < 0 || posZ >= point_buffer_resolution->y || posZ < 0 ||	ray_position_entry.y < 0 || ray_position_entry.y > max_height && ray_direction.y >= 0)
+			/*Return if ray goes above the max horizon*/
+			if (ray_position_entry.y > max_height && ray_direction.y >= 0)
 			{
 				return;
 			}
