@@ -16,6 +16,7 @@ namespace CudaSpace
 	__device__ glm::ivec2 *texture_resolution;
 	__device__ glm::ivec2 *point_buffer_resolution;
 	__device__ glm::ivec2 *color_map_resolution;
+	__device__ glm::ivec2 *boundary;
 	__device__ glm::mat3x3 *pixel_to_grid_matrix;
 
 	/*
@@ -154,7 +155,7 @@ namespace CudaSpace
 		float height;
 
 		height = getPointBufferValue(floor(entry.x / pow(2.f, LOD)), floor(entry.z / pow(2.f, LOD)), mirrorX, mirrorZ, LOD);
-		if(direction.y > 0)
+		if(direction.y >= 0)
 		{
 			result = entry.y <= height;
 		}
@@ -162,7 +163,7 @@ namespace CudaSpace
 		{
 			result = exit.y <= height;
 			if (result)
-				entry += glm::max(0.f, (height - entry.y) / direction.y);
+				entry += glm::max(0.f, (height - entry.y) / direction.y) * direction;
 		}
 
 		 return result;		
@@ -204,10 +205,10 @@ namespace CudaSpace
 		}
 
 		/*Advance ray until it is outside of the buffer*/
-		while(ray_position.x < point_buffer_resolution->x && ray_position.z < point_buffer_resolution->y && !(ray_direction.y > 0 && ray_position.y > max_height))
+		while(ray_position.x < boundary->x && ray_position.z < boundary->y && !(ray_direction.y > 0 && ray_position.y > max_height))
 		{
 			calculateExitPointAndEdge(ray_position, ray_direction, ray_exit, edge, LOD);
-			if(testIntersection(ray_position, ray_exit, ray_direction, mirrorX, mirrorZ, LOD))
+			while(testIntersection(ray_position, ray_exit, ray_direction, mirrorX, mirrorZ, LOD))
 			{
 				if (LOD > 0)
 					LOD--;
@@ -291,6 +292,7 @@ namespace CudaSpace
 		CudaSpace::color_map_resolution = new glm::ivec2();
 		CudaSpace::point_buffer_resolution = new glm::ivec2();
 
+		boundary = new glm::ivec2(static_cast<int>(point_buffer_resolution.x * pow(2.0f, LOD_levels - 1)), static_cast<int>(point_buffer_resolution.y * pow(2.0f, LOD_levels - 1)));
 		frame_dimension = new glm::vec3();
 		pixel_to_grid_matrix = new glm::mat3x3();
 		grid_camera_position = new glm::vec3(point_buffer_resolution.x * pow(2.0f, LOD_levels - 2), 0, point_buffer_resolution.y * pow(2.0f, LOD_levels - 2));

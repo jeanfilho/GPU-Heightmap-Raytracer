@@ -69,7 +69,7 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-glm::ivec2 point_buffer_resolution(256, 256);
+glm::ivec2 point_buffer_resolution(512, 512);
 
 // CPU-Side point sections
 const int point_sections_size = 4;
@@ -77,10 +77,10 @@ std::thread* thread_pool[point_sections_size][point_sections_size];
 bool thread_exit[point_sections_size][point_sections_size];
 float* point_sections[point_sections_size][point_sections_size];
 glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
-glm::vec2 cell_size; //Cell size at the finest LOD level
+glm::vec3 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
-const int LOD_levels = 1;
+const int LOD_levels = 3;
 const int stride_x = LOD_levels == 1 ? 1 : static_cast<int>(glm::pow(4, LOD_levels - 1)) + 1; // Number of elements per Quad-tree root
 
 // clock
@@ -224,13 +224,13 @@ void readLASHeader(std::string filename)
 
 	/*Calculate area per point to set cell dimension*/
 	float point_area = static_cast<float>(deltaX * deltaY / header.GetPointRecordsCount());
-	cell_size = glm::vec2(point_area, point_area);
+	cell_size = glm::vec3(point_area, point_area, point_area);
 
 	/*Place the camera on the center of the point cloud*/
 	camera_position = glm::vec3(deltaX / 2, header.GetMaxZ() - header.GetMinZ(), deltaY / 2);
 
 	/*Set max height for visualization*/
-	max_height = static_cast<float>(header.GetMaxZ() - header.GetMinZ());
+	max_height = static_cast<float>(header.GetMaxZ() - header.GetMinZ())/cell_size.z;
 
 	/*Close the file stream*/
 	ifs.close();
@@ -272,8 +272,8 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		float fX, fY, fZ;
 
 		fX = static_cast<float>(p.GetX() - header.GetMinX()) / cell_size.x;
-		fY = static_cast<float>(p.GetY() - header.GetMinY()) / cell_size.y;
-		fZ = static_cast<float>(p.GetZ() - header.GetMinZ());
+		fY = static_cast<float>(p.GetY() - header.GetMinY()) / cell_size.z;
+		fZ = static_cast<float>(p.GetZ() - header.GetMinZ()) / cell_size.y;
 
 		/* Skip if the point is outside of the section */
 		if (fX < origin.x || fX >= higher_boundary.x || fY < origin.y || fY >= higher_boundary.y)
