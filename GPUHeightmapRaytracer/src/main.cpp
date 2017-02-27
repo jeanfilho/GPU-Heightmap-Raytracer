@@ -975,7 +975,7 @@ void initialize()
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
 	loadJPEG(color_map_file);
 	setupTexture();
-	checkCudaErrors(cudaMallocHost(&h_point_buffer, sizeof(float) *point_buffer_resolution.x * point_buffer_resolution.y * stride_x));
+	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y * stride_x];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * stride_x));
 	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, cell_size, LOD_levels, stride_x, max_height);
 }
@@ -986,9 +986,9 @@ void freeResourcers()
 	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaFree(d_point_buffer));
 	checkCudaErrors(cudaFree(d_color_map));
-	checkCudaErrors(cudaFreeHost(h_point_buffer));
 	CudaSpace::freeDeviceVariables();
 	delete[](h_color_map);
+	delete[](h_point_buffer);
 	for each(std::thread* ptr in thread_pool)
 		delete ptr;
 	for each(float* ptr in point_sections)

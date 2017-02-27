@@ -95,9 +95,9 @@ namespace CudaSpace
 	 */
 	__device__ void updateParameters(float &tMax, float &tDelta, int &pos, float ray_position, float ray_direction, float cell_size)
 	{
-		tDelta = (ray_direction < 0 ? -1 : 1) * cell_size / ray_direction;
 		pos = floor(ray_position / cell_size);
-		tMax = ((floor(ray_position / cell_size) + (ray_direction < 0 ? 0 : 1)) * cell_size - ray_position) / ray_direction;
+		tDelta = (ray_direction < 0 ? -1 : 1) * cell_size / ray_direction;
+		tMax += ((floor(ray_position / cell_size) + (ray_direction < 0 ? 0 : 1)) * cell_size - ray_position) / ray_direction;
 	}
 
 	/*
@@ -105,10 +105,18 @@ namespace CudaSpace
 	 */
 	__device__ float getPointBufferValue(int posX, int posZ, int LOD)
 	{
-		int index;
-		//TODO calculate proper index for LOD
-		index = posX * stride_x + point_buffer_resolution->x * stride_x * posZ;
+		int index = 0;
 
+		/* Calculate LOD offsets in section from the coarsest to the finest */
+		int temp_x = posX / static_cast<int>(pow(2.f, LOD_levels - 1 - LOD));
+		int temp_y = posZ / static_cast<int>(pow(2.f, LOD_levels - 1 - LOD));
+		index = temp_x * stride_x + temp_y * point_buffer_resolution->x * stride_x;
+		for (int i = LOD_levels - 2; i >= 0; i--)
+		{
+			temp_x = posX % static_cast<int>(pow(2.f, i + 1)) / static_cast<int>(glm::pow(2.f, i)); // results in either 0 or 1
+			temp_y = posZ % static_cast<int>(pow(2.f, i + 1)) / static_cast<int>(glm::pow(2.f, i));
+			index += 1 + (temp_x * (static_cast<int>(pow(4.f, i - 1)) + 1) + temp_y * 2 * static_cast<int>(pow(4.f, i - 1)) + 1);
+		}
 		return point_buffer[index];
 	}
 
@@ -126,11 +134,14 @@ namespace CudaSpace
 		int posX, posZ, high_x, high_z, low_x, low_z, LOD;
 		char stepX, stepZ;
 		glm::vec3 ray_position_entry, ray_position_exit;
+		
 
-		LOD = 0;
+		LOD = LOD_levels - 1;
 		setUpStartingParameters(tMaxX, tDeltaX, stepX, posX, ray_origin.x, ray_direction.x, cell_size->x * pow(2.0f, LOD));
 		setUpStartingParameters(tMaxZ, tDeltaZ, stepZ, posZ, ray_origin.z, ray_direction.z, cell_size->y * pow(2.0f, LOD));
-		low_z = low_x = 0;
+
+		low_x = 0;
+		low_z = 0;
 		high_x = point_buffer_resolution->x;
 		high_z = point_buffer_resolution->y;
 
@@ -146,7 +157,8 @@ namespace CudaSpace
 				/*Step one LOD down*/
 				if (LOD > 0)
 				{
-					ray_position_entry += glm::max(0.0f, (height_value - ray_position_entry.y) / ray_direction.y) * ray_direction;
+					if(ray_direction.y < 0)
+						ray_position_entry += glm::max(0.0f, (height_value - ray_position_entry.y) / ray_direction.y) * ray_direction;
 
 					LOD--;
 					low_x = posX * 2;
@@ -184,7 +196,7 @@ namespace CudaSpace
 			ray_position_exit = ray_origin + ray_direction * (tMaxX < tMaxZ ? tMaxX : tMaxZ); //Check where next step will be
 			
 
-			/*Check if ray is outside of the grid/quadtree cell or going up after max_height is reached*/
+			/*Check if ray is outside of the grid/quadtree cell*/
 			if(posX >= high_x || posX < low_x || posZ >= high_z || posZ < low_z)
 			{
 				/*Step one LOD up*/
@@ -200,7 +212,8 @@ namespace CudaSpace
 					}
 					else
 					{
-						low_x = low_z = 0;
+						low_x = 0;
+						low_z = 0;
 						high_x = point_buffer_resolution->x;
 						high_z = point_buffer_resolution->y;
 					}
@@ -296,7 +309,7 @@ namespace CudaSpace
 
 		frame_dimension = new glm::vec3();
 		pixel_to_grid_matrix = new glm::mat3x3();
-		grid_camera_position = new glm::vec3(point_buffer_resolution.x / 2.f * cell_size.x, 0, point_buffer_resolution.y / 2.f * cell_size.y);
+		grid_camera_position = new glm::vec3(point_buffer_resolution.x / 2.f * cell_size.x * pow(2.0f, LOD_levels - 1), 0, point_buffer_resolution.y / 2.f * cell_size.y * pow(2.0f, LOD_levels - 1));
 
 		*CudaSpace::point_buffer_resolution = point_buffer_resolution;
 		*CudaSpace::texture_resolution = texture_resolution;
@@ -340,7 +353,7 @@ namespace CudaSpace
 		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos, use_color_map);
 		checkCudaErrors(cudaDeviceSynchronize());
 		
-		blockSize = dim3(1, 1080/2);
+		blockSize = dim3(1, texture_resolution.y/2);
 		// ReSharper disable CppAssignedValueIsNeverUsed
 		gridSize = dim3(texture_resolution.x / blockSize.x, texture_resolution.y / blockSize.y);
 		cuda_rayTrace << <gridSize, blockSize >> > (color_buffer);
