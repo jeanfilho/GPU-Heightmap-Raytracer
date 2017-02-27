@@ -148,7 +148,7 @@ namespace CudaSpace
 		/*Loop the DDA algorithm*/
 		ray_position_entry = ray_origin;
 		ray_position_exit = ray_origin + ray_direction * (tMaxX < tMaxZ ? tMaxX : tMaxZ);
-		while(true)
+		while(!(ray_position_entry.y > max_height && ray_direction.y >= 0))
 		{
 			/*Check if ray intersects with back faces - Texel intersection from Dick, C., et al. (2009). GPU ray-casting for scalable terrain rendering. Proceedings of EUROGRAPHICS, Citeseer. Page */
 			height_value = getPointBufferValue(posX, posZ, LOD);

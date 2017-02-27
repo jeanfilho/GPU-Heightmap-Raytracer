@@ -272,9 +272,9 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		unsigned int index[LOD_levels];
 		float fX, fY, fZ;
 
-		fX = float(p.GetX() - header.GetMinX());
-		fY = float(p.GetY() - header.GetMinY());
-		fZ = float(p.GetZ() - header.GetMinZ());
+		fX = static_cast<float>(p.GetX() - header.GetMinX());
+		fY = static_cast<float>(p.GetY() - header.GetMinY());
+		fZ = static_cast<float>(p.GetZ() - header.GetMinZ());
 
 		/* Skip if the point is outside of the section */
 		if (fX < lower_boundary.x || fX >= higher_boundary.x || fY < lower_boundary.y || fY >= higher_boundary.y)
