@@ -327,7 +327,7 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 {
 	point_sections_origins[pos.x][pos.y] = origin;
-	point_sections[pos.x][pos.y] = new float[sizeof(float) * stride_x * point_buffer_resolution.x * point_buffer_resolution.y]();
+	point_sections[pos.x][pos.y] = new float[stride_x * point_buffer_resolution.x * point_buffer_resolution.y]();
 	thread_exit[pos.x][pos.y] = new bool(false);
 	thread_pool[pos.x][pos.y] = new std::thread(loadLASToSection, point_cloud_file, origin, thread_exit[pos.x][pos.y], point_sections[pos.x][pos.y]);
 
@@ -1016,7 +1016,6 @@ void initialize()
 	initializeSections();
 
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
-	loadJPEG(color_map_file);
 	setupTexture();
 	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y * stride_x];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * stride_x));
