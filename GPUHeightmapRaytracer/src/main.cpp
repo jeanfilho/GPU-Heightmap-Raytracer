@@ -70,7 +70,7 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-glm::ivec2 point_buffer_resolution(2, 2);
+glm::ivec2 point_buffer_resolution(32, 32);
 
 // CPU-Side point sections
 const int point_sections_size = 4;
@@ -81,7 +81,7 @@ glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec3 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
-const int LOD_levels = 12;
+const int LOD_levels = 8;
 int stride_x; // Number of elements per Quad-tree root
 int LOD_resolutions[LOD_levels];
 int LOD_indexes[LOD_levels];
@@ -575,11 +575,11 @@ void copyPointBuffer()
 	section_position = bottom_left - point_sections_origins[minX][minY];
 	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / glm::pow(2.0f, LOD_levels - 1))), static_cast<int>(glm::floor(section_position.y / glm::pow(2.0f, LOD_levels - 1))));
 
-	/*Set the camera position in the correct position inside the buffer*/
+	/*Set the camera position in the correct position inside the buffer based on the distance from cell origin to point_buffer origin*/
 	camera_point_buffer = 
-		glm::vec3(glm::pow(2.0f, LOD_levels - 2) + section_position.x - cell_position.x * glm::pow(2.0f, LOD_levels - 1),
+		glm::vec3((section_position.x - cell_position.x * glm::pow(2.0f, LOD_levels - 1)) + (point_buffer_resolution.x*2 - 2) * glm::pow(2.0f, LOD_levels - 3),
 				  camera_position.y,
-				  glm::pow(2.0f, LOD_levels - 2) + section_position.y - cell_position.y * glm::pow(2.0f, LOD_levels - 1));
+				  (section_position.y - cell_position.y * glm::pow(2.0f, LOD_levels - 1)) + (point_buffer_resolution.y*2 - 2) * glm::pow(2.0f, LOD_levels - 3));
 
 	for (int i = LOD_levels - 1; i >= 0; i--)
 	{
