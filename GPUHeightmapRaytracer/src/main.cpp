@@ -47,13 +47,14 @@
 //============================
 
 // Filenames
-std::string point_cloud_file = "autzen.las";
+std::string point_cloud_file = "points.las";
 std::string color_map_file = "autzen.jpg";
 
 // Camera related
 glm::ivec2 texture_resolution(1920, 1080);
 glm::vec3
 	camera_position(0, 0, 0),
+	camera_point_buffer(0, 0, 0),
 	camera_forward(glm::normalize(glm::vec3(0, -.9, 1))),
 	frame_dimension(40, 30, 30); //width, height, distance from camera
 glm::vec2 boundaries(0, 0);
@@ -574,9 +575,14 @@ void copyPointBuffer()
 	section_position = bottom_left - point_sections_origins[minX][minY];
 	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / glm::pow(2.0f, LOD_levels - 1))), static_cast<int>(glm::floor(section_position.y / glm::pow(2.0f, LOD_levels - 1))));
 
+	/*Set the camera position in the correct position inside the buffer*/
+	camera_point_buffer = 
+		glm::vec3(glm::pow(2.0f, LOD_levels - 2) + section_position.x - cell_position.x * glm::pow(2.0f, LOD_levels - 1),
+				  camera_position.y,
+				  glm::pow(2.0f, LOD_levels - 2) + section_position.y - cell_position.y * glm::pow(2.0f, LOD_levels - 1));
+
 	for (int i = LOD_levels - 1; i >= 0; i--)
 	{
-
 		/*Copy the data from the lower left section*/
 		row_offset = 0;
 		for (row_index = cell_position.y; row_index < LOD_resolutions[i]; row_index++)
@@ -689,11 +695,12 @@ void updateTexture()
 	checkCudaErrors(cudaGraphicsResourceGetMappedPointer(reinterpret_cast<void **>(&devPtr), &size, cuda_pbo_resource));
 
 	//Call the wrapper function invoking the CUDA Kernel
-	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_position, devPtr, use_color_map);
+	CudaSpace::rayTrace(texture_resolution, frame_dimension, camera_forward, camera_point_buffer, devPtr, use_color_map, max_height);
 
 	//Synchronize CUDA calls and release the buffer for OpenGL and CPU use;
 	checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
 }
+
 /*
  * Copy pixel data to a texture and display it on screen
  */
@@ -841,6 +848,13 @@ void keyboardDown(unsigned char key, int x, int y)
 	case 'p':
 	case '27':
 		exit(0);
+	case '+':
+		max_height += 100;
+		break;
+	case'-':
+		max_height -= 100;
+		break;
+
 	/* Movement */
 	case 'e':
 		movement_up = qe_movement_distance;

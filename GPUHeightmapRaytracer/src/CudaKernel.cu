@@ -183,7 +183,6 @@ namespace CudaSpace
 		return result;
 	}
 
-
 	/*
 	 * Start the ray tracing algorithm for each pixel
 	 */
@@ -219,11 +218,12 @@ namespace CudaSpace
 	/*
 	* Set device parameters
 	*/
-	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos, bool use_color)
+	__global__ void cuda_setParameters(glm::vec3 frame_dim, glm::vec3 camera_for, glm::vec3 grid_camera_pos, bool use_color, float max_height)
 	{
 		*frame_dimension = frame_dim;
-		grid_camera_position->y = grid_camera_pos.y;
+		*grid_camera_position = grid_camera_pos;
 		use_color_map = use_color;
+		CudaSpace::max_height = max_height;
 
 		/*Basis change matrix from view to grid space*/
 		glm::vec3 u, v, w;
@@ -242,13 +242,8 @@ namespace CudaSpace
 		CudaSpace::color_map_resolution = new glm::ivec2();
 		CudaSpace::point_buffer_resolution = new glm::ivec2();
 
-		boundary = new glm::ivec2(static_cast<int>(point_buffer_resolution.x * pow(2.0f, LOD_levels - 1)), static_cast<int>(point_buffer_resolution.y * pow(2.0f, LOD_levels - 1)));
-		frame_dimension = new glm::vec3();
-		pixel_to_grid_matrix = new glm::mat3x3();
-		grid_camera_position = new glm::vec3(point_buffer_resolution.x * pow(2.0f, LOD_levels - 2), 0, point_buffer_resolution.y * pow(2.0f, LOD_levels - 2));
 		LOD_indexes = new int[LOD_levels]();
 		LOD_resolutions = new int[LOD_levels]();
-
 		LOD_resolutions[LOD_levels - 1] = point_buffer_resolution.x;
 		LOD_indexes[LOD_levels - 1] = 0;
 		for(auto i = LOD_levels - 2; i >= 0; i--)
@@ -256,6 +251,11 @@ namespace CudaSpace
 			LOD_indexes[i] = LOD_indexes[i + 1] + LOD_resolutions[i + 1] * LOD_resolutions[i + 1];
 			LOD_resolutions[i] = LOD_resolutions[i + 1] * 2;
 		}
+
+		boundary = new glm::ivec2(LOD_resolutions[0], LOD_resolutions[0]);
+		frame_dimension = new glm::vec3();
+		pixel_to_grid_matrix = new glm::mat3x3();
+		grid_camera_position = new glm::vec3();
 
 		*CudaSpace::point_buffer_resolution = point_buffer_resolution;
 		*CudaSpace::texture_resolution = texture_resolution;
@@ -285,7 +285,7 @@ namespace CudaSpace
 	/*
 	 * Set grid and block dimensions, create LOD, pass parameters to device and call kernels
 	 */
-	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer, bool use_color_map)
+	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_pos, unsigned char* color_buffer, bool use_color_map, float max_height)
 	{
 		/*
 		 *  Things to consider:
@@ -294,7 +294,7 @@ namespace CudaSpace
 		 *  Maximum number of threads per block
 		 */
 		dim3 gridSize, blockSize;
-		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos, use_color_map);
+		cuda_setParameters << <1, 1 >> > (frame_dimensions, camera_forward, grid_camera_pos, use_color_map, max_height);
 		checkCudaErrors(cudaDeviceSynchronize());
 		
 		blockSize = dim3(1, texture_resolution.y/2);
