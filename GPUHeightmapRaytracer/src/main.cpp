@@ -71,18 +71,18 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-glm::ivec2 point_buffer_resolution(256, 256);
+glm::ivec2 point_buffer_resolution(512, 512);
 
 // CPU-Side point sections
 const int point_sections_size = 4;
 std::thread* thread_pool[point_sections_size][point_sections_size];
-bool thread_exit[point_sections_size][point_sections_size];
+bool * thread_exit[point_sections_size][point_sections_size];
 float* point_sections[point_sections_size][point_sections_size];
 glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec3 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
-const int LOD_levels = 5;
+const int LOD_levels = 4;
 int stride_x; // Number of elements per Quad-tree root
 int LOD_resolutions[LOD_levels];
 int LOD_indexes[LOD_levels];
@@ -275,8 +275,8 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		float fX, fY, fZ;
 
 		fX = static_cast<float>(p.GetX() - header.GetMinX()) / cell_size.x;
-		fY = static_cast<float>(p.GetY() - header.GetMinY()) / cell_size.z;
-		fZ = static_cast<float>(p.GetZ() - header.GetMinZ()) / cell_size.y;
+		fY = static_cast<float>(p.GetY() - header.GetMinY()) / cell_size.y;
+		fZ = static_cast<float>(p.GetZ() - header.GetMinZ()) / cell_size.z;
 
 		/* Skip if the point is outside of the section */
 		if (fX < origin.x || fX >= higher_boundary.x || fY < origin.y || fY >= higher_boundary.y)
@@ -289,7 +289,7 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		/* Calculate LOD offsets in section from the coarsest to the finest */
 		for (int i = LOD_levels - 1; i >= 0; i--)
 		{
-			index[i] = LOD_indexes[i] + x / glm::pow(2.f, i) + y / glm::pow(2.f, i) * LOD_resolutions[i];
+			index[i] = LOD_indexes[i] + x / static_cast<int>(glm::pow(2.f, i)) + y / static_cast<int>(glm::pow(2.f, i)) * LOD_resolutions[i];
 		}
 
 		/* Break the loop if the thread must be terminated */
@@ -308,6 +308,11 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 
 	/*Close the file stream*/
 	ifs.close();
+
+	/*Wait until the thread is unloaded to delete the point data*/
+	while (!*exit_control) std::this_thread::yield();
+	delete[]point_section;
+	delete exit_control;
 }
 
 
@@ -324,13 +329,17 @@ void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 {
 	point_sections_origins[pos.x][pos.y] = origin;
 	point_sections[pos.x][pos.y] = new float[sizeof(float) * stride_x * point_buffer_resolution.x * point_buffer_resolution.y]();
-	thread_pool[pos.x][pos.y] = new std::thread(loadLASToSection, point_cloud_file, origin, &thread_exit[pos.x][pos.y], point_sections[pos.x][pos.y]);
+	thread_exit[pos.x][pos.y] = new bool(false);
+	thread_pool[pos.x][pos.y] = new std::thread(loadLASToSection, point_cloud_file, origin, thread_exit[pos.x][pos.y], point_sections[pos.x][pos.y]);
 
 	/* Set inner threads' priority higher than outers'*/
 	if(pos.x >= 1 && pos.x <=2 && pos.y >= 1 && pos.y <= 2)
 		SetThreadPriority(thread_pool[pos.x][pos.y]->native_handle(), 0);
 	else
 		SetThreadPriority(thread_pool[pos.x][pos.y]->native_handle(), -2);
+
+	/*Detach to let the thread end on its own after the object has been deleted*/
+	thread_pool[pos.x][pos.y]->detach();
 }
 
 /* 
@@ -361,12 +370,9 @@ void unloadSectionsColumn(int column)
 	{
 		if (thread_pool[column][i]->joinable())
 		{
-			thread_exit[column][i] = true;
-			thread_pool[column][i]->join();
+			*thread_exit[column][i] = true;
 			delete thread_pool[column][i];
-			thread_exit[column][i] = false;
 		}
-		delete[]point_sections[column][i];
 	}
 }
 
@@ -380,12 +386,9 @@ void unloadSectionsRow(int row)
 	{
 		if (thread_pool[i][row]->joinable())
 		{
-			thread_exit[i][row] = true;
-			thread_pool[i][row]->join();
+			*thread_exit[i][row] = true;
 			delete thread_pool[i][row];
-			thread_exit[i][row] = false;
 		}
-		delete[]point_sections[i][row];
 	}
 }
 
@@ -404,6 +407,10 @@ void rearrangeSectionsX(int x)
 				point_sections[i][j] = point_sections[i - x][j];
 				point_sections_origins[i][j] = point_sections_origins[i - x][j];
 				thread_pool[i][j] = thread_pool[i - x][j];
+				if((j >= 1 || j <= 2) && ( i >= 1 && i <= 2))
+					SetThreadPriority(thread_pool[i][j]->native_handle(), 0);
+				else
+					SetThreadPriority(thread_pool[i][j]->native_handle(), -2);
 			}
 	}
 	else
@@ -414,6 +421,10 @@ void rearrangeSectionsX(int x)
 				point_sections[i][j] = point_sections[i - x][j];
 				point_sections_origins[i][j] = point_sections_origins[i - x][j];
 				thread_pool[i][j] = thread_pool[i - x][j];
+				if ((j >= 1 || j <= 2) && (i >= 1 && i <= 2))
+					SetThreadPriority(thread_pool[i][j]->native_handle(), 0);
+				else
+					SetThreadPriority(thread_pool[i][j]->native_handle(), -2);
 			}
 	}
 }
@@ -433,6 +444,10 @@ void rearrangeSectionsY(int y)
 				point_sections[i][j] = point_sections[i][j - y];
 				point_sections_origins[i][j] = point_sections_origins[i][j - y];
 				thread_pool[i][j] = thread_pool[i][j - y];
+				if ((j >= 1 || j <= 2) && (i >= 1 && i <= 2))
+					SetThreadPriority(thread_pool[i][j]->native_handle(), 0);
+				else
+					SetThreadPriority(thread_pool[i][j]->native_handle(), -2);
 			}
 	}
 	else
@@ -443,6 +458,10 @@ void rearrangeSectionsY(int y)
 				point_sections[i][j] = point_sections[i][j - y];
 				point_sections_origins[i][j] = point_sections_origins[i][j - y];
 				thread_pool[i][j] = thread_pool[i][j - y];
+				if ((j >= 1 || j <= 2) && (i >= 1 && i <= 2))
+					SetThreadPriority(thread_pool[i][j]->native_handle(), 0);
+				else
+					SetThreadPriority(thread_pool[i][j]->native_handle(), -2);
 			}
 	}
 }
@@ -974,12 +993,12 @@ void initialize()
 
 	LOD_resolutions[LOD_levels - 1] = point_buffer_resolution.x;
 	LOD_indexes[LOD_levels - 1] = 0;
-	stride_x = glm::pow(4.f, LOD_levels - 1);
+	stride_x = static_cast<int>(glm::pow(4.f, LOD_levels - 1));
 	for (auto i = LOD_levels - 2; i >= 0; i--)
 	{
 		LOD_indexes[i] = LOD_indexes[i + 1] + LOD_resolutions[i + 1] * LOD_resolutions[i + 1];
 		LOD_resolutions[i] = LOD_resolutions[i + 1] * 2;
-		stride_x += glm::pow(4.f, i);
+		stride_x += static_cast<int>(glm::pow(4.f, i));
 	}
 
 	readLASHeader(point_cloud_file);
@@ -1006,6 +1025,8 @@ void freeResourcers()
 	for each(std::thread* ptr in thread_pool)
 		delete ptr;
 	for each(float* ptr in point_sections)
+		delete[] ptr;
+	for each(bool* ptr in thread_exit)
 		delete[] ptr;
 	
 }
