@@ -61,9 +61,9 @@ namespace CudaSpace
 	__device__ float getPointBufferValue(int posX, int posZ, bool mirrorX, bool mirrorZ, int LOD)
 	{
 		if (mirrorX)
-			posX = LOD_resolutions[LOD] - posX;
+			posX = LOD_resolutions[LOD] - 1 - posX;
 		if (mirrorZ)
-			posZ = LOD_resolutions[LOD] - posZ;
+			posZ = LOD_resolutions[LOD] - 1 - posZ;
 
 		return point_buffer[LOD_indexes[LOD] + posX + posZ * LOD_resolutions[LOD]];
 	}
