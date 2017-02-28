@@ -69,7 +69,7 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-glm::ivec2 point_buffer_resolution(512, 512);
+glm::ivec2 point_buffer_resolution(2, 2);
 
 // CPU-Side point sections
 const int point_sections_size = 4;
@@ -80,7 +80,7 @@ glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec3 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
-const int LOD_levels = 4;
+const int LOD_levels = 12;
 int stride_x; // Number of elements per Quad-tree root
 int LOD_resolutions[LOD_levels];
 int LOD_indexes[LOD_levels];
@@ -272,9 +272,9 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		unsigned int index[LOD_levels];
 		float fX, fY, fZ;
 
-		fX = static_cast<float>(p.GetX() - header.GetMinX()) / cell_size.x;
-		fY = static_cast<float>(p.GetY() - header.GetMinY()) / cell_size.y;
-		fZ = static_cast<float>(p.GetZ() - header.GetMinZ()) / cell_size.z;
+		fX = static_cast<float>(p.GetX() - header.GetMinX());
+		fY = static_cast<float>(p.GetY() - header.GetMinY());
+		fZ = static_cast<float>(p.GetZ() - header.GetMinZ());
 
 		/* Skip if the point is outside of the section */
 		if (fX < origin.x || fX >= higher_boundary.x || fY < origin.y || fY >= higher_boundary.y)
@@ -568,6 +568,7 @@ void copyPointBuffer()
 	/*Copy the quad-trees into the point buffer, start with lower left corner and proceed row-wise */
 	glm::vec2 section_position;
 	glm::ivec2 cell_position;
+	int row_index, row_offset;
 
 	/*Section position at lower left section*/
 	section_position = bottom_left - point_sections_origins[minX][minY];
@@ -575,10 +576,6 @@ void copyPointBuffer()
 
 	for (int i = LOD_levels - 1; i >= 0; i--)
 	{
-		int row_index, row_offset;
-
-		/*Get the cell position for this LOD*/
-		
 
 		/*Copy the data from the lower left section*/
 		row_offset = 0;

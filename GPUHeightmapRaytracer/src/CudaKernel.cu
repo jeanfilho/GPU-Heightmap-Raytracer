@@ -56,42 +56,6 @@ namespace CudaSpace
 	}
 
 	/*
-	 * GLM::SIGN produces compile error in CUDA
-	 */
-	__device__ char sign(float input)
-	{
-		return input >= 0 ? 1 : -1;
-	}
-
-	/*
-	 * Set up parameters for tracing a single ray at the beginning
-	 */
-	__device__ void setUpStartingParameters(float &tMax, float &tDelta, char &step, int &pos, float ray_origin, float ray_direction, float cell_size)
-	{
-		/*Set starting voxel*/
-		pos = static_cast<int>(floor(ray_origin / cell_size));
-
-		/*Set whether position should increment or decrement based on ray direction*/
-		step = sign(ray_direction);
-
-		/*
-		 *Calculate the first intersection in the grid and
-		 *the distance between each axis intersection with the grid
-		 */
-		if (abs(ray_direction) < 0.00001f)
-		{
-			tMax = FLT_MAX;
-			tDelta = 0;
-		}
-		else
-		{
-			tMax = ((floor(ray_origin / cell_size) + (ray_direction < 0 ? 0 : 1)) * cell_size - ray_origin) / ray_direction;
-			tDelta = (ray_direction < 0 ? -1 : 1) * cell_size / ray_direction;
-		}
-	}
-
-
-	/*
 	 * Update raytracing parameters accourdingly to the current LOD
 	 */
 	__device__ void updateParameters(float &tMax, float &tDelta, int &pos, float ray_position, float ray_direction, float cell_size)
@@ -170,6 +134,7 @@ namespace CudaSpace
 		glm::vec3 ray_exit;
 		int edge;
 		int LOD = LOD_levels - 1;
+		bool intersection;
 
 		/*Mirror direction to simplify algorithm*/
 		if(ray_direction.x < 0)
@@ -198,19 +163,20 @@ namespace CudaSpace
 		while(ray_position.x < boundary->x && ray_position.z < boundary->y && !(ray_direction.y > 0 && ray_position.y > max_height))
 		{
 			calculateExitPointAndEdge(ray_position, ray_direction, ray_exit, edge, LOD);
-			while(testIntersection(ray_position, ray_exit, ray_direction, mirrorX, mirrorZ, LOD))
+			intersection = testIntersection(ray_position, ray_exit, ray_direction, mirrorX, mirrorZ, LOD);
+			if(intersection)
 			{
 				if (LOD > 0)
-				{
 					LOD--;
-					calculateExitPointAndEdge(ray_position, ray_direction, ray_exit, edge, LOD);
-				}
 				else
 					return getHeightColorValue(ray_position.y, result);
 				
 			}
-			LOD = glm::min(LOD + 1 - (edge % 2), LOD_levels - 1);
-			ray_position = ray_exit;			
+			else
+			{
+				LOD = glm::min(LOD + 1 - (edge % 2), LOD_levels - 1);
+				ray_position = ray_exit;			
+			}
 		}
 	}
 	
