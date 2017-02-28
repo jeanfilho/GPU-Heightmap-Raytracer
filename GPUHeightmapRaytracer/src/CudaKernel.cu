@@ -8,6 +8,7 @@ namespace CudaSpace
 	__device__ bool use_color_map = false;
 	__device__ float max_height = 0;
 	__device__ float *point_buffer;
+	__device__ int *LOD_indexes, *LOD_resolutions;
 	__device__ unsigned char *color_map;
 	__device__ int LOD_levels, stride_x = 1;
 	__device__ glm::vec3 *frame_dimension;
@@ -105,23 +106,12 @@ namespace CudaSpace
 	 */
 	__device__ float getPointBufferValue(int posX, int posZ, bool mirrorX, bool mirrorZ, int LOD)
 	{
-		int index = 0;
 		if (mirrorX)
-			posX = point_buffer_resolution->x * static_cast<int>(pow(2.f, LOD_levels - 1 - LOD)) - posX;
-		if(mirrorZ)
-			posZ = point_buffer_resolution->y * static_cast<int>(pow(2.f, LOD_levels - 1 - LOD)) - posZ;
+			posX = LOD_resolutions[LOD] - posX;
+		if (mirrorZ)
+			posZ = LOD_resolutions[LOD] - posZ;
 
-		/* Calculate LOD offsets in section from the coarsest to the finest */
-		int temp_x = posX / static_cast<int>(pow(2.f, LOD_levels - 1 - LOD));
-		int temp_y = posZ / static_cast<int>(pow(2.f, LOD_levels - 1 - LOD));
-		index = temp_x * stride_x + temp_y * point_buffer_resolution->x * stride_x;
-		for (int i = LOD_levels - 2; i >= 0; i--)
-		{
-			temp_x = posX % static_cast<int>(pow(2.f, i + 1)) / static_cast<int>(glm::pow(2.f, i)); // results in either 0 or 1
-			temp_y = posZ % static_cast<int>(pow(2.f, i + 1)) / static_cast<int>(glm::pow(2.f, i));
-			index += 1 + (temp_x * (static_cast<int>(pow(4.f, i - 1)) + 1) + temp_y * 2 * static_cast<int>(pow(4.f, i - 1)) + 1);
-		}
-		return point_buffer[index];
+		return point_buffer[LOD_indexes[LOD] + posX + posZ * LOD_resolutions[LOD]];
 	}
 
 	/*
@@ -134,13 +124,13 @@ namespace CudaSpace
 		tZ = ((floor(entry.z / pow(2.f, LOD)) + 1) * pow(2.f, LOD) - entry.z) / direction.z;
 		if(tX < tZ)
 		{
-			result = entry + tX *direction;
+			result = entry + tX * direction;
 			result.x = (floor(entry.x / pow(2.f, LOD)) + 1) * pow(2.f, LOD);
 			edge = floor(result.x / (pow(2.f, LOD)));
 		}
 		else
 		{
-			result = entry + tZ *direction;
+			result = entry + tZ * direction;
 			result.z = (floor(entry.z / pow(2.f, LOD)) + 1) * pow(2.f, LOD);
 			edge = floor(result.z / pow(2.f, LOD));
 		}
@@ -296,12 +286,22 @@ namespace CudaSpace
 		frame_dimension = new glm::vec3();
 		pixel_to_grid_matrix = new glm::mat3x3();
 		grid_camera_position = new glm::vec3(point_buffer_resolution.x * pow(2.0f, LOD_levels - 2), 0, point_buffer_resolution.y * pow(2.0f, LOD_levels - 2));
+		LOD_indexes = new int[LOD_levels]();
+		LOD_resolutions = new int[LOD_levels]();
+
+		LOD_resolutions[LOD_levels - 1] = point_buffer_resolution.x;
+		LOD_indexes[LOD_levels - 1] = 0;
+		for(auto i = LOD_levels - 2; i >= 0; i--)
+		{
+			LOD_indexes[i] = LOD_indexes[i + 1] + LOD_resolutions[i + 1] * LOD_resolutions[i + 1];
+			LOD_resolutions[i] = LOD_resolutions[i + 1] * 2;
+		}
 
 		*CudaSpace::point_buffer_resolution = point_buffer_resolution;
 		*CudaSpace::texture_resolution = texture_resolution;
+		*CudaSpace::color_map_resolution = color_map_resolution;
 		CudaSpace::point_buffer = point_buffer;
 		CudaSpace::color_map = color_map;
-		*CudaSpace::color_map_resolution = color_map_resolution;
 		CudaSpace::LOD_levels = LOD_levels;
 		CudaSpace::stride_x = stride_x;
 		CudaSpace::max_height = max_height;
@@ -318,6 +318,8 @@ namespace CudaSpace
 		delete(pixel_to_grid_matrix);
 		delete(color_map_resolution);
 		delete(point_buffer_resolution);
+		delete[](LOD_indexes);
+		delete[](LOD_resolutions);
 	}
 
 	/*

@@ -41,6 +41,8 @@
 
 #include <Windows.h>
 
+#include <omp.h>
+
 
 //============================
 //		GLOBAL VARIABLES
@@ -69,7 +71,7 @@ glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
 float* h_point_buffer;
-glm::ivec2 point_buffer_resolution(512, 512);
+glm::ivec2 point_buffer_resolution(256, 256);
 
 // CPU-Side point sections
 const int point_sections_size = 4;
@@ -80,8 +82,10 @@ glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec3 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
 float height_tolerance = 10;
-const int LOD_levels = 3;
-const int stride_x = LOD_levels == 1 ? 1 : static_cast<int>(glm::pow(4, LOD_levels - 1)) + 1; // Number of elements per Quad-tree root
+const int LOD_levels = 5;
+int stride_x; // Number of elements per Quad-tree root
+int LOD_resolutions[LOD_levels];
+int LOD_indexes[LOD_levels];
 
 // clock
 std::chrono::system_clock sys_clock;
@@ -266,8 +270,7 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 	while (reader.ReadNextPoint())
 	{
 		liblas::Point const& p = reader.GetPoint();
-		int x, y, // X and Y coordinates in the finest LOD
-			temp_x, temp_y;
+		int x, y; // X and Y coordinates in the finest LOD
 		unsigned int index[LOD_levels];
 		float fX, fY, fZ;
 
@@ -284,14 +287,9 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		y = static_cast<int>(glm::floor(fY - origin.y));
 
 		/* Calculate LOD offsets in section from the coarsest to the finest */
-		temp_x = x / static_cast<int>(glm::pow(2, LOD_levels - 1));
-		temp_y = y / static_cast<int>(glm::pow(2, LOD_levels - 1));
-		index[LOD_levels - 1] = temp_x * stride_x + temp_y * point_buffer_resolution.x * stride_x;
-		for (int i = LOD_levels - 2; i >= 0; i--)
+		for (int i = LOD_levels - 1; i >= 0; i--)
 		{
-			temp_x = x % static_cast<int>(glm::pow(2, i + 1)) / static_cast<int>(glm::pow(2, i)); // results in either 0 or 1
-			temp_y = y % static_cast<int>(glm::pow(2, i + 1)) / static_cast<int>(glm::pow(2, i));
-			index[i] = index[i + 1] + 1 + (temp_x * (static_cast<int>(glm::pow(4, i - 1)) + 1) + temp_y * 2 * static_cast<int>(glm::pow(4, i - 1)) + 1);
+			index[i] = LOD_indexes[i] + x / glm::pow(2.f, i) + y / glm::pow(2.f, i) * LOD_resolutions[i];
 		}
 
 		/* Break the loop if the thread must be terminated */
@@ -552,58 +550,64 @@ void copyPointBuffer()
 
 	/*Copy the quad-trees into the point buffer, start with lower left corner and proceed row-wise */
 	glm::vec2 section_position;
-	glm::ivec2 cell_position;
-	int row_index, row_offset;
 
-	/*Cell position at lower left section*/
+	/*Section position at lower left section*/
 	section_position = bottom_left - point_sections_origins[minX][minY];
-	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / glm::pow(2.0f, LOD_levels - 1))), static_cast<int>(glm::floor(section_position.y / glm::pow(2.0f, LOD_levels - 1))));
-
-	/*Copy the data from the lower left section*/
-	row_offset = 0;
-	for (row_index = cell_position.y; row_index < point_buffer_resolution.y; row_index++)
+	
+	for (int i = 0; i < LOD_levels; i++)
 	{
-		memcpy(h_point_buffer + row_offset * stride_x * point_buffer_resolution.x,
-			point_sections[minX][minY] + cell_position.x * stride_x + row_index * point_buffer_resolution.x * stride_x,
-			sizeof(float) * stride_x * (point_buffer_resolution.x - cell_position.x));
+		int row_index, row_offset;
+		glm::ivec2 cell_position;
 
-		row_offset++;
-	}
+		/*Get the cell position for this LOD*/
+		cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / glm::pow(2.0f, i))), static_cast<int>(glm::floor(section_position.y / glm::pow(2.0f, i))));
 
-	/*Copy the data from the bottom right section*/
-	row_offset = 0;
-	row_index = cell_position.x == 0 ? point_buffer_resolution.y : cell_position.y;
-	for (row_index; row_index < point_buffer_resolution.y; row_index++)
-	{
-		memcpy(h_point_buffer + (point_buffer_resolution.x - cell_position.x) * stride_x + row_offset * stride_x * point_buffer_resolution.x,
-			point_sections[maxX][minY] + row_index * point_buffer_resolution.x * stride_x,
-			sizeof(float) * stride_x * cell_position.x);
+		/*Copy the data from the lower left section*/
+		row_offset = 0;
+		for (row_index = cell_position.y; row_index < LOD_resolutions[i]; row_index++)
+		{
+			memcpy(h_point_buffer + LOD_indexes[i] + row_offset * LOD_resolutions[i],
+				point_sections[minX][minY] + LOD_indexes[i] + cell_position.x + row_index * LOD_resolutions[i],
+				sizeof(float) * (LOD_resolutions[i] - cell_position.x));
 
-		row_offset++;
-	}
+			row_offset++;
+		}
 
-	/*Copy the data from top left section */
-	row_offset = 0;
-	row_index = cell_position.y == 0 ? cell_position.y : 0;
-	for (row_index; row_index < cell_position.y; row_index++)
-	{
-		memcpy(h_point_buffer + (row_index + point_buffer_resolution.y - cell_position.y) * stride_x * point_buffer_resolution.x,
-			point_sections[minX][maxY] + cell_position.x * stride_x + row_offset * stride_x * point_buffer_resolution.x,
-			sizeof(float) * stride_x * (point_buffer_resolution.x - cell_position.x));
+		/*Copy the data from the bottom right section*/
+		row_offset = 0;
+		row_index = cell_position.x == 0 ? LOD_resolutions[i] : cell_position.y;
+		for (row_index; row_index < LOD_resolutions[i]; row_index++)
+		{
+			memcpy(h_point_buffer + LOD_indexes[i] + (LOD_resolutions[i] - cell_position.x) + row_offset * LOD_resolutions[i],
+				point_sections[maxX][minY] + LOD_indexes[i] + row_index * LOD_resolutions[i],
+				sizeof(float) * cell_position.x);
 
-		row_offset++;
-	}
+			row_offset++;
+		}
 
-	/*Copy the data from top right section*/
-	row_offset = 0;
-	row_index = cell_position.y == 0 || cell_position.x == 0 ? cell_position.y : 0;
-	for (row_index; row_index < cell_position.y; row_index++)
-	{
-		memcpy(h_point_buffer + (point_buffer_resolution.x - cell_position.x) * stride_x + (row_index + point_buffer_resolution.y - cell_position.y) * stride_x * point_buffer_resolution.x,
-			point_sections[maxX][maxY] + row_offset * stride_x * point_buffer_resolution.x,
-			sizeof(float) * stride_x * cell_position.x);
+		/*Copy the data from top left section */
+		row_offset = 0;
+		row_index = cell_position.y == 0 ? cell_position.y : 0;
+		for (row_index; row_index < cell_position.y; row_index++)
+		{
+			memcpy(h_point_buffer + LOD_indexes[i] + (row_index + LOD_resolutions[i] - cell_position.y) * LOD_resolutions[i],
+				point_sections[minX][maxY] + LOD_indexes[i] + cell_position.x + row_offset * LOD_resolutions[i],
+				sizeof(float) * (LOD_resolutions[i] - cell_position.x));
 
-		row_offset++;
+			row_offset++;
+		}
+
+		/*Copy the data from top right section*/
+		row_offset = 0;
+		row_index = cell_position.y == 0 || cell_position.x == 0 ? cell_position.y : 0;
+		for (row_index; row_index < cell_position.y; row_index++)
+		{
+			memcpy(h_point_buffer + LOD_indexes[i] + (LOD_resolutions[i] - cell_position.x) + (row_index + LOD_resolutions[i] - cell_position.y) * LOD_resolutions[i],
+				point_sections[maxX][maxY] + LOD_indexes[i] + row_offset * LOD_resolutions[i],
+				sizeof(float) * cell_position.x);
+
+			row_offset++;
+		}
 	}
 
 	/*Send point buffer to the gpu*/
@@ -968,6 +972,16 @@ void initialize()
 {
 	glewInit();
 
+	LOD_resolutions[LOD_levels - 1] = point_buffer_resolution.x;
+	LOD_indexes[LOD_levels - 1] = 0;
+	stride_x = glm::pow(4.f, LOD_levels - 1);
+	for (auto i = LOD_levels - 2; i >= 0; i--)
+	{
+		LOD_indexes[i] = LOD_indexes[i + 1] + LOD_resolutions[i + 1] * LOD_resolutions[i + 1];
+		LOD_resolutions[i] = LOD_resolutions[i + 1] * 2;
+		stride_x += glm::pow(4.f, i);
+	}
+
 	readLASHeader(point_cloud_file);
 	initializeSections();
 
@@ -977,6 +991,7 @@ void initialize()
 	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y * stride_x];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * stride_x));
 	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, LOD_levels, stride_x, max_height);
+
 }
 
 /* Free Resources */
