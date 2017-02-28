@@ -56,16 +56,6 @@ namespace CudaSpace
 	}
 
 	/*
-	 * Update raytracing parameters accourdingly to the current LOD
-	 */
-	__device__ void updateParameters(float &tMax, float &tDelta, int &pos, float ray_position, float ray_direction, float cell_size)
-	{
-		pos = floor(ray_position / cell_size);
-		tDelta = (ray_direction < 0 ? -1 : 1) * cell_size / ray_direction;
-		tMax = ((floor(ray_position / cell_size) + (ray_direction < 0 ? 0 : 1)) * cell_size - ray_position) / ray_direction;
-	}
-
-	/*
 	 * Retrieve the height value from point buffer based on LOD and position
 	 */
 	__device__ float getPointBufferValue(int posX, int posZ, bool mirrorX, bool mirrorZ, int LOD)
