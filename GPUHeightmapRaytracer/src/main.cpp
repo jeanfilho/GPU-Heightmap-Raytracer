@@ -41,8 +41,6 @@
 
 #include <Windows.h>
 
-#include <omp.h>
-
 
 //============================
 //		GLOBAL VARIABLES
@@ -569,17 +567,18 @@ void copyPointBuffer()
 
 	/*Copy the quad-trees into the point buffer, start with lower left corner and proceed row-wise */
 	glm::vec2 section_position;
+	glm::ivec2 cell_position;
 
 	/*Section position at lower left section*/
 	section_position = bottom_left - point_sections_origins[minX][minY];
-	
-	for (int i = 0; i < LOD_levels; i++)
+	cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / glm::pow(2.0f, LOD_levels - 1))), static_cast<int>(glm::floor(section_position.y / glm::pow(2.0f, LOD_levels - 1))));
+
+	for (int i = LOD_levels - 1; i >= 0; i--)
 	{
 		int row_index, row_offset;
-		glm::ivec2 cell_position;
 
 		/*Get the cell position for this LOD*/
-		cell_position = glm::ivec2(static_cast<int>(glm::floor(section_position.x / glm::pow(2.0f, i))), static_cast<int>(glm::floor(section_position.y / glm::pow(2.0f, i))));
+		
 
 		/*Copy the data from the lower left section*/
 		row_offset = 0;
@@ -627,6 +626,7 @@ void copyPointBuffer()
 
 			row_offset++;
 		}
+		cell_position *= 2;
 	}
 
 	/*Send point buffer to the gpu*/
