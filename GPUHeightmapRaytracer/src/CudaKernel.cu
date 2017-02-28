@@ -117,29 +117,29 @@ namespace CudaSpace
 	/*
 	 *Calculate exit point based on current ray position
 	 */
-	__device__ void calculateExitPointAndEdge(glm::vec3& entry, glm::vec3& direction, glm::vec3& result, int &edge, int LOD)
+	__device__ void calculateExitPointAndEdge(glm::vec3& entry, glm::vec3& direction, glm::vec3& exit, int &edge, int LOD)
 	{
 		float tX, tZ;
 		tX = ((floor(entry.x / pow(2.f, LOD)) + 1) * pow(2.f, LOD) - entry.x) / direction.x;
 		tZ = ((floor(entry.z / pow(2.f, LOD)) + 1) * pow(2.f, LOD) - entry.z) / direction.z;
-		if(tX < tZ)
+		if(tX <= tZ)
 		{
-			result = entry + tX * direction;
-			result.x = (floor(entry.x / pow(2.f, LOD)) + 1) * pow(2.f, LOD);
-			edge = floor(result.x / (pow(2.f, LOD)));
+			exit = entry + tX * direction;
+			exit.x = (floor(entry.x / pow(2.f, LOD)) + 1) * pow(2.f, LOD);
+			edge = floor(exit.x / pow(2.f, LOD));
 		}
 		else
 		{
-			result = entry + tZ * direction;
-			result.z = (floor(entry.z / pow(2.f, LOD)) + 1) * pow(2.f, LOD);
-			edge = floor(result.z / pow(2.f, LOD));
+			exit = entry + tZ * direction;
+			exit.z = (floor(entry.z / pow(2.f, LOD)) + 1) * pow(2.f, LOD);
+			edge = floor(exit.z / pow(2.f, LOD));
 		}
 	}
 
 	/*
 	 * Test if the ray intersects with the height field
 	 */
-	__device__ bool testIntersection(glm::vec3 &entry, glm::vec3 &exit, glm::vec3 &direction, bool mirrorX, bool mirrorZ, int LOD)
+	__device__ bool testIntersection(glm::vec3 &entry, glm::vec3 &exit, glm::vec3 &direction, bool mirrorX, bool mirrorZ, int &LOD)
 	{
 		bool result;
 		float height;
@@ -156,7 +156,7 @@ namespace CudaSpace
 				entry += glm::max(0.f, (height - entry.y) / direction.y) * direction;
 		}
 
-		 return result;		
+		return result;		
 	}
 
 
@@ -201,9 +201,13 @@ namespace CudaSpace
 			while(testIntersection(ray_position, ray_exit, ray_direction, mirrorX, mirrorZ, LOD))
 			{
 				if (LOD > 0)
+				{
 					LOD--;
+					calculateExitPointAndEdge(ray_position, ray_direction, ray_exit, edge, LOD);
+				}
 				else
 					return getHeightColorValue(ray_position.y, result);
+				
 			}
 			LOD = glm::min(LOD + 1 - (edge % 2), LOD_levels - 1);
 			ray_position = ray_exit;			
