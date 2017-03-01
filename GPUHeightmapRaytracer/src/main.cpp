@@ -47,7 +47,7 @@
 //============================
 
 // Filenames
-std::string point_cloud_file = "points.las";
+std::string point_cloud_file = "ot_12SVK3000024000_1.las";
 std::string color_map_file = "autzen.jpg";
 
 // Camera related
@@ -65,7 +65,7 @@ bool use_LOD = false;
 bool use_color_map = false;
 
 // JPEG image
-unsigned char *h_color_map = NULL;
+CudaSpace::Color *h_color_map;
 glm::ivec2 color_map_resolution = glm::zero<glm::ivec2>();
 
 // Point buffer to be copied to GPU
@@ -77,6 +77,7 @@ const int point_sections_size = 4;
 std::thread* thread_pool[point_sections_size][point_sections_size];
 bool * thread_exit[point_sections_size][point_sections_size];
 float* point_sections[point_sections_size][point_sections_size];
+CudaSpace::Color* color_sections[point_sections_size][point_sections_size];
 glm::vec2 point_sections_origins[point_sections_size][point_sections_size];
 glm::vec3 cell_size; //Cell size at the finest LOD level
 float max_height = 0;
@@ -110,81 +111,8 @@ float jl_rotation_angle = 1.f;
 //============================
 
 float* d_point_buffer;
-unsigned char *d_color_map = NULL;
+CudaSpace::Color *d_color_map;
 struct cudaGraphicsResource* cuda_pbo_resource;
-
-//============================
-//		HELPER FUNCTIONS
-//============================
-
-/*Loads JPEG image from disk*/
-bool loadJPEG(std::string filename)
-{
-	unsigned char *pos;
-	unsigned char r, g, b;
-	struct jpeg_decompress_struct cinfo;
-	struct jpeg_error_mgr jerr;
-	int width, height;
-	JSAMPARRAY pJpegBuffer;
-
-	cinfo.err = jpeg_std_error(&jerr);
-	jpeg_create_decompress(&cinfo);
-
-	/*Open JPEG and start decompression*/
-	int row;
-	FILE * infile;
-	if (fopen_s(&infile, ("../Data/" + filename).c_str(), "rb") != NULL) 
-	{
-			fprintf(stderr, "can't open %s\n", filename.c_str());
-			return false;
-	}
-
-	jpeg_stdio_src(&cinfo, infile);
-	jpeg_read_header(&cinfo, TRUE);
-	jpeg_start_decompress(&cinfo);
-	
-	width = cinfo.output_width;
-	height = cinfo.output_height;
-	h_color_map = new unsigned char[width*height * 3];
-	pos = h_color_map + width * height * 3;
-
-	row = width * cinfo.output_components;
-	pJpegBuffer = (*cinfo.mem->alloc_sarray)
-		(reinterpret_cast<j_common_ptr>(&cinfo), JPOOL_IMAGE, row, 1);
-
-	/*Read data in JPEG - scan happens from top to bottom*/
-	while (cinfo.output_scanline < cinfo.output_height)
-	{
-		jpeg_read_scanlines(&cinfo, pJpegBuffer, 1);
-		pos -= row;
-		for (int x = 0; x < width; x++)
-		{
-			r = pJpegBuffer[0][cinfo.output_components * x];
-			g = pJpegBuffer[0][cinfo.output_components * x + 1];
-			b = pJpegBuffer[0][cinfo.output_components * x + 2];
-
-			*(pos++) = r;
-			*(pos++) = g;
-			*(pos++) = b;
-		}
-		pos -= row;
-	}
-
-	/*Finish decompression and release object*/
-	jpeg_finish_decompress(&cinfo);
-	jpeg_destroy_decompress(&cinfo);
-	fclose(infile);
-
-	color_map_resolution = glm::ivec2(width, height);
-
-	/*Pass values to GPU*/
-	size_t count = sizeof(unsigned char) * 3 * width * height;
-	checkCudaErrors(cudaMalloc(&d_color_map, count));
-	checkCudaErrors(cudaMemcpy(d_color_map, h_color_map, count, cudaMemcpyHostToDevice));
-	
-	return true;
-}
-
 
 //============================
 //		LAS FUNCTIONS
@@ -243,7 +171,7 @@ void readLASHeader(std::string filename)
 * Load points using libLas Library in LAS format
 * Source: http://www.liblas.org/tutorial/cpp.html
 */
-void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control, float *point_section)
+void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control, float *point_section, CudaSpace::Color * color_section)
 {
 	/*Create input stream and associate it with .las file opened to read in binary mode*/
 	std::ifstream ifs;
@@ -271,7 +199,7 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		liblas::Point const& p = reader.GetPoint();
 		int x, y; // X and Y coordinates in the finest LOD
 		unsigned int index[LOD_levels];
-		float fX, fY, fZ;
+		float fX, fY, fZ, r, g, b;
 
 		fX = static_cast<float>(p.GetX() - header.GetMinX());
 		fY = static_cast<float>(p.GetY() - header.GetMinY());
@@ -295,6 +223,10 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		if (*exit_control)
 			break;
 
+		/*Insert color values in the color map*/
+		liblas::Color const& c = p.GetColor();
+		color_section[x + y * LOD_resolutions[0]] = CudaSpace::Color(c.GetRed(), c.GetGreen(), c.GetBlue());
+
 		/*Insert the highest values from finest to coarsest level of the Quad-tree*/
 		for (int i = 0; i < LOD_levels; i++)
 		{
@@ -311,6 +243,7 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 	/*Wait until the thread is unloaded to delete the point data*/
 	while (!*exit_control) std::this_thread::yield();
 	delete[]point_section;
+	delete[]color_section;
 	delete exit_control;
 }
 
@@ -328,10 +261,11 @@ void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 {
 	point_sections_origins[pos.x][pos.y] = origin;
 	point_sections[pos.x][pos.y] = new float[stride_x * point_buffer_resolution.x * point_buffer_resolution.y]();
+	color_sections[pos.x][pos.y] = new CudaSpace::Color[LOD_resolutions[0] * LOD_resolutions[0]];
 	thread_exit[pos.x][pos.y] = new bool(false);
-	thread_pool[pos.x][pos.y] = new std::thread(loadLASToSection, point_cloud_file, origin, thread_exit[pos.x][pos.y], point_sections[pos.x][pos.y]);
+	thread_pool[pos.x][pos.y] = new std::thread(loadLASToSection, point_cloud_file, origin, thread_exit[pos.x][pos.y], point_sections[pos.x][pos.y], color_sections[pos.x][pos.y]);
 
-	/* Set inner threads' priority higher than outers'*/
+	/* Set inner threads' priority higher than outers' */
 	if(pos.x >= 1 && pos.x <=2 && pos.y >= 1 && pos.y <= 2)
 		SetThreadPriority(thread_pool[pos.x][pos.y]->native_handle(), 0);
 	else
@@ -404,6 +338,7 @@ void rearrangeSectionsX(int x)
 			for (j = 0; j < point_sections_size; j++)
 			{
 				point_sections[i][j] = point_sections[i - x][j];
+				color_sections[i][j] = color_sections[i - x][j];
 				point_sections_origins[i][j] = point_sections_origins[i - x][j];
 				thread_pool[i][j] = thread_pool[i - x][j];
 				if((j >= 1 || j <= 2) && ( i >= 1 && i <= 2))
@@ -418,6 +353,7 @@ void rearrangeSectionsX(int x)
 			for (j = 0; j < point_sections_size; j++)
 			{
 				point_sections[i][j] = point_sections[i - x][j];
+				color_sections[i][j] = color_sections[i - x][j];
 				point_sections_origins[i][j] = point_sections_origins[i - x][j];
 				thread_pool[i][j] = thread_pool[i - x][j];
 				if ((j >= 1 || j <= 2) && (i >= 1 && i <= 2))
@@ -441,6 +377,7 @@ void rearrangeSectionsY(int y)
 			for (j = point_sections_size - 1; j >= y; j--)
 			{
 				point_sections[i][j] = point_sections[i][j - y];
+				color_sections[i][j] = color_sections[i][j - y];
 				point_sections_origins[i][j] = point_sections_origins[i][j - y];
 				thread_pool[i][j] = thread_pool[i][j - y];
 				if ((j >= 1 || j <= 2) && (i >= 1 && i <= 2))
@@ -455,6 +392,7 @@ void rearrangeSectionsY(int y)
 			for (j = 0; j < point_sections_size + y; j++)
 			{
 				point_sections[i][j] = point_sections[i][j - y];
+				color_sections[i][j] = color_sections[i][j - y];
 				point_sections_origins[i][j] = point_sections_origins[i][j - y];
 				thread_pool[i][j] = thread_pool[i][j - y];
 				if ((j >= 1 || j <= 2) && (i >= 1 && i <= 2))
@@ -629,11 +567,61 @@ void copyPointBuffer()
 
 			row_offset++;
 		}
-		cell_position *= 2;
+		if(i > 0)
+			cell_position *= 2;
+	}
+
+	/*Copy color data */
+	/*Copy the data from the lower left section*/
+	row_offset = 0;
+	for (row_index = cell_position.y; row_index < LOD_resolutions[0]; row_index++)
+	{
+		memcpy(h_color_map + row_offset * LOD_resolutions[0],
+			color_sections[minX][minY] +  cell_position.x + row_index * LOD_resolutions[0],
+			sizeof(CudaSpace::Color) * (LOD_resolutions[0] - cell_position.x));
+
+		row_offset++;
+	}
+
+	/*Copy the data from the bottom right section*/
+	row_offset = 0;
+	row_index = cell_position.x == 0 ? LOD_resolutions[0] : cell_position.y;
+	for (row_index; row_index < LOD_resolutions[0]; row_index++)
+	{
+		memcpy(h_color_map + (LOD_resolutions[0] - cell_position.x) + row_offset * LOD_resolutions[0],
+			color_sections[maxX][minY] + row_index * LOD_resolutions[0],
+			sizeof(CudaSpace::Color) * cell_position.x);
+
+		row_offset++;
+	}
+
+	/*Copy the data from top left section */
+	row_offset = 0;
+	row_index = cell_position.y == 0 ? cell_position.y : 0;
+	for (row_index; row_index < cell_position.y; row_index++)
+	{
+		memcpy(h_color_map +  + (row_index + LOD_resolutions[0] - cell_position.y) * LOD_resolutions[0],
+			color_sections[minX][maxY] + cell_position.x + row_offset * LOD_resolutions[0],
+			sizeof(CudaSpace::Color) * (LOD_resolutions[0] - cell_position.x));
+
+		row_offset++;
+	}
+
+	/*Copy the data from top right section*/
+	row_offset = 0;
+	row_index = cell_position.y == 0 || cell_position.x == 0 ? cell_position.y : 0;
+	for (row_index; row_index < cell_position.y; row_index++)
+	{
+		memcpy(h_color_map + (LOD_resolutions[0] - cell_position.x) + (row_index + LOD_resolutions[0] - cell_position.y) * LOD_resolutions[0],
+			color_sections[maxX][maxY] + row_offset * LOD_resolutions[0],
+			sizeof(CudaSpace::Color) * cell_position.x);
+
+		row_offset++;
 	}
 
 	/*Send point buffer to the gpu*/
-	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * stride_x * point_buffer_resolution.y , cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * stride_x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_color_map, h_color_map, sizeof(CudaSpace::Color) * LOD_resolutions[0] * LOD_resolutions[0], cudaMemcpyHostToDevice));
 }
 /*
  * This method sets up a texture object and its respective buffers to share with CUDA device
@@ -1018,8 +1006,10 @@ void initialize()
 	checkCudaErrors(cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId()));
 	setupTexture();
 	h_point_buffer = new float[point_buffer_resolution.x * point_buffer_resolution.y * stride_x];
+	h_color_map = new CudaSpace::Color[LOD_resolutions[0] * LOD_resolutions[0]];
 	checkCudaErrors(cudaMalloc(&d_point_buffer, sizeof(float) * point_buffer_resolution.x * point_buffer_resolution.y * stride_x));
-	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, color_map_resolution, LOD_levels, stride_x, max_height);
+	checkCudaErrors(cudaMalloc(&d_color_map, sizeof(CudaSpace::Color) * LOD_resolutions[0] * LOD_resolutions[0]));
+	CudaSpace::initializeDeviceVariables(point_buffer_resolution, texture_resolution, d_point_buffer, d_color_map, LOD_levels, stride_x, max_height);
 
 }
 
@@ -1035,6 +1025,8 @@ void freeResourcers()
 	for each(std::thread* ptr in thread_pool)
 		delete ptr;
 	for each(float* ptr in point_sections)
+		delete[] ptr;
+	for each(CudaSpace::Color* ptr in color_sections)
 		delete[] ptr;
 	for each(bool* ptr in thread_exit)
 		delete[] ptr;

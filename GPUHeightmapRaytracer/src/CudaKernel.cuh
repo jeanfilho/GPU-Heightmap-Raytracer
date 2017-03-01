@@ -34,7 +34,19 @@
  */
 namespace CudaSpace
 {
+	__global__ struct Color
+	{
+		__device__ __host__ Color(){ r = 0; g = 0; b = 0; }
+		__device__ __host__ Color(unsigned char r, unsigned char g, unsigned char b) { this->r = r; this->g = g; this->b = b; }
+		__device__ __host__ Color(unsigned short r, unsigned short g, unsigned short b)
+		{
+			this->r = unsigned char (glm::floor(r / static_cast<float>(USHRT_MAX) * 255.f));
+			this->g = unsigned char (glm::floor(g / static_cast<float>(USHRT_MAX) * 255.f));
+			this->b = unsigned char (glm::floor(b / static_cast<float>(USHRT_MAX) * 255.f));
+		}
+		unsigned char r, g, b;
+	};
 	__host__ void rayTrace(glm::ivec2& texture_resolution, glm::vec3& frame_dimensions, glm::vec3& camera_forward, glm::vec3& grid_camera_position, unsigned char* colorBuffer, bool use_color, float max_height);
-	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_res, int LOD_levels, int stride_x, float max_height);
+	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, CudaSpace::Color* d_color_map, int LOD_levels, int stride_x, float max_height);
 	__host__ void freeDeviceVariables();
 }

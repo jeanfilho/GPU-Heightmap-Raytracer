@@ -9,33 +9,33 @@ namespace CudaSpace
 	__device__ float max_height = 0;
 	__device__ float *point_buffer;
 	__device__ int *LOD_indexes, *LOD_resolutions;
-	__device__ unsigned char *color_map;
+	__device__ CudaSpace::Color *color_map;
 	__device__ int LOD_levels, stride_x = 1;
 	__device__ glm::vec3 *frame_dimension;
 	__device__ glm::vec3 *camera_forward;
 	__device__ glm::vec3 *grid_camera_position;
 	__device__ glm::ivec2 *texture_resolution;
 	__device__ glm::ivec2 *point_buffer_resolution;
-	__device__ glm::ivec2 *color_map_resolution;
 	__device__ glm::ivec2 *boundary;
 	__device__ glm::mat3x3 *pixel_to_grid_matrix;
 
 	/*
 	* Get a colormap value from a height map index
 	*/
-	__device__ void getColorMapValue(int posX, int posZ, glm::uvec3& result)
+	__device__ void getColorMapValue(int posX, int posZ, bool mirrorX, bool mirrorZ, Color& result)
 	{
-		int colorX, colorZ;
-		colorX = float(posX) / float(point_buffer_resolution->x) * color_map_resolution->x;
-		colorZ = float(posZ) / float(point_buffer_resolution->y) * color_map_resolution->y;
-		int index = (colorX + colorZ * color_map_resolution->x) * 3;
-		result = glm::uvec3(color_map[index], color_map[index + 1], color_map[index + 2]);
+		if (mirrorX)
+			posX = LOD_resolutions[0] - 1 - posX;
+		if (mirrorZ)
+			posZ = LOD_resolutions[0] - 1 - posZ;
+
+		result = color_map[posX + posZ * LOD_resolutions[0]];
 	}
 
 	/*
 	* Get a value based on max height
 	*/
-	__device__ void getHeightColorValue(float height, glm::uvec3& result)
+	__device__ void getHeightColorValue(float height, Color& result)
 	{
 		unsigned char r, g, b;
 		height = height * 2 / max_height ;
@@ -52,7 +52,7 @@ namespace CudaSpace
 			g = r;
 			b = 255 - height * 255;
 		}
-		result = glm::uvec3(r, g, b);
+		result = Color(r, g, b);
 	}
 
 	/*
@@ -118,7 +118,7 @@ namespace CudaSpace
 	 *	Dick, C., et al. (2009). GPU ray-casting for scalable terrain rendering. Proceedings of EUROGRAPHICS, Citeseer.
 	 *	ray_direction MUST be normalized
 	 */
-	__device__ void castRay(glm::vec3& ray_position, glm::vec3& ray_direction, glm::uvec3& result)
+	__device__ void castRay(glm::vec3& ray_position, glm::vec3& ray_direction, Color& result)
 	{
 		bool mirrorX, mirrorZ;
 		glm::vec3 ray_exit;
@@ -159,7 +159,13 @@ namespace CudaSpace
 				if (LOD > 0)
 					LOD--;
 				else
-					return getHeightColorValue(ray_position.y, result);
+				{
+					if (use_color_map)
+						getColorMapValue(floor(ray_position.x), floor(ray_position.z), mirrorX, mirrorZ, result);
+					else
+						getHeightColorValue(ray_position.y, result);
+					return;
+				}
 				
 			}
 			else
@@ -195,7 +201,7 @@ namespace CudaSpace
 		pixel_y = blockIdx.y * blockDim.y + threadIdx.y;
 		threadId = pixel_x + pixel_y * texture_resolution->x;
 		
-		glm::uvec3 color_value(200, 200, 200);
+		Color color_value(static_cast<unsigned char>(200), static_cast<unsigned char>(200), static_cast<unsigned char>(200));
 		glm::vec3 ray_direction, ray_position;
 		glm::ivec2 pixel_position;
 
@@ -236,10 +242,9 @@ namespace CudaSpace
 	/* 
 	 * Initialize device 
 	 */
-	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_resolution, glm::ivec2 texture_resolution, float* point_buffer, unsigned char *color_map, glm::ivec2 color_map_resolution, int LOD_levels, int stride_x, float max_height)
+	__global__ void cuda_initializeDeviceVariables(glm::ivec2 point_buffer_resolution, glm::ivec2 texture_resolution, float* point_buffer, CudaSpace::Color *color_map, int LOD_levels, int stride_x, float max_height)
 	{
 		CudaSpace::texture_resolution = new glm::ivec2();
-		CudaSpace::color_map_resolution = new glm::ivec2();
 		CudaSpace::point_buffer_resolution = new glm::ivec2();
 
 		LOD_indexes = new int[LOD_levels]();
@@ -259,7 +264,6 @@ namespace CudaSpace
 
 		*CudaSpace::point_buffer_resolution = point_buffer_resolution;
 		*CudaSpace::texture_resolution = texture_resolution;
-		*CudaSpace::color_map_resolution = color_map_resolution;
 		CudaSpace::point_buffer = point_buffer;
 		CudaSpace::color_map = color_map;
 		CudaSpace::LOD_levels = LOD_levels;
@@ -276,7 +280,6 @@ namespace CudaSpace
 		delete(texture_resolution);
 		delete(frame_dimension);
 		delete(pixel_to_grid_matrix);
-		delete(color_map_resolution);
 		delete(point_buffer_resolution);
 		delete[](LOD_indexes);
 		delete[](LOD_resolutions);
@@ -307,9 +310,9 @@ namespace CudaSpace
 	/*
 	 * Initialize variables in the device
 	 */
-	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, unsigned char* d_color_map, glm::ivec2& color_map_res, int LOD_levels, int stride_x, float max_height)
+	__host__ void initializeDeviceVariables(glm::ivec2& point_buffer_res, glm::ivec2& texture_res, float* d_gpu_pointBuffer, CudaSpace::Color* d_color_map, int LOD_levels, int stride_x, float max_height)
 	{
-		cuda_initializeDeviceVariables << <1, 1 >> > (point_buffer_res, texture_res, d_gpu_pointBuffer, d_color_map, color_map_res, LOD_levels, stride_x, max_height);
+		cuda_initializeDeviceVariables << <1, 1 >> > (point_buffer_res, texture_res, d_gpu_pointBuffer, d_color_map, LOD_levels, stride_x, max_height);
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
