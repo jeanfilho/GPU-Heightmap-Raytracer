@@ -29,8 +29,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/rotate_vector.hpp>
 
-#include "jpeglib.h"
-
 #include <liblas/liblas.hpp>
 
 #include <cuda_gl_interop.h>
@@ -47,7 +45,7 @@
 //============================
 
 // Filenames
-std::string point_cloud_file = "ot_12SVK3000024000_1.las";
+std::string point_cloud_file = "points3.las";
 std::string color_map_file = "autzen.jpg";
 
 // Camera related
@@ -56,7 +54,7 @@ glm::vec3
 	camera_position(0, 0, 0),
 	camera_point_buffer(0, 0, 0),
 	camera_forward(glm::normalize(glm::vec3(0, -.9, 1))),
-	frame_dimension(40, 30, 30); //width, height, distance from camera
+	frame_dimension(16*2, 9*2, 20); //width, height, distance from camera
 glm::vec2 boundaries(0, 0);
 
 GLuint textureID;
@@ -150,15 +148,17 @@ void readLASHeader(std::string filename)
 	double deltaX, deltaY;
 	deltaX = header.GetMaxX() - header.GetMinX();
 	deltaY = header.GetMaxY() - header.GetMinY();
-	boundaries = glm::vec2(deltaX, deltaY);
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
 
 	/*Calculate area per point to set cell dimension*/
-	float point_area = static_cast<float>(deltaX * deltaY / header.GetPointRecordsCount());
-	cell_size = glm::vec3(point_area, point_area, point_area);
+	float value = .25f;
+	cell_size = glm::vec3(value, value, value);
+	boundaries = glm::vec2(deltaX / cell_size.x, deltaY / cell_size.y);
 
-	/*Place the camera on the center of the point cloud*/
-	camera_position = glm::vec3(deltaX / 2, header.GetMaxZ() - header.GetMinZ(), deltaY / 2);
+	/*Place the camera on the first point of the cloud*/
+	reader.ReadNextPoint();
+	liblas::Point const& p = reader.GetPoint();
+	camera_position = glm::vec3((p.GetX() - header.GetMinX()) / cell_size.x, (header.GetMaxZ() - header.GetMinZ())/cell_size.z, (p.GetY() - header.GetMinY()) / cell_size.x);
 
 	/*Set max height for visualization*/
 	max_height = static_cast<float>(header.GetMaxZ() - header.GetMinZ())/cell_size.z;
@@ -199,14 +199,14 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		liblas::Point const& p = reader.GetPoint();
 		int x, y; // X and Y coordinates in the finest LOD
 		unsigned int index[LOD_levels];
-		float fX, fY, fZ, r, g, b;
+		float fX, fY, fZ;
 
-		fX = static_cast<float>(p.GetX() - header.GetMinX());
-		fY = static_cast<float>(p.GetY() - header.GetMinY());
-		fZ = static_cast<float>(p.GetZ() - header.GetMinZ());
+		fX = static_cast<float>(p.GetX() - header.GetMinX()) / cell_size.x;
+		fY = static_cast<float>(p.GetY() - header.GetMinY()) / cell_size.y;
+		fZ = static_cast<float>(p.GetZ() - header.GetMinZ()) / cell_size.z;
 
 		/* Skip if the point is outside of the section */
-		if (fX < origin.x || fX >= higher_boundary.x || fY < origin.y || fY >= higher_boundary.y)
+		if (fX < origin.x || fX >= higher_boundary.x || fY < origin.y || fY >= higher_boundary.y ||	p.GetClassification().GetClass() == 7)
 			continue;
 
 		/* Calculate point position for the finest LOD in this section */
@@ -242,7 +242,7 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 
 	/*Wait until the thread is unloaded to delete the point data*/
 	while (!*exit_control) std::this_thread::yield();
-	delete[]point_section;
+	delete[]point_section;	
 	delete[]color_section;
 	delete exit_control;
 }
@@ -270,9 +270,6 @@ void allocateSection(glm::ivec2 pos, glm::vec2 origin)
 		SetThreadPriority(thread_pool[pos.x][pos.y]->native_handle(), 0);
 	else
 		SetThreadPriority(thread_pool[pos.x][pos.y]->native_handle(), -2);
-
-	/*Detach to let the thread end on its own after the object has been deleted*/
-	thread_pool[pos.x][pos.y]->detach();
 }
 
 /* 
@@ -304,6 +301,8 @@ void unloadSectionsColumn(int column)
 		if (thread_pool[column][i]->joinable())
 		{
 			*thread_exit[column][i] = true;
+			/*Detach to let the thread end on its own after the object has been deleted*/
+			thread_pool[column][i]->detach();
 			delete thread_pool[column][i];
 		}
 	}
@@ -320,6 +319,8 @@ void unloadSectionsRow(int row)
 		if (thread_pool[i][row]->joinable())
 		{
 			*thread_exit[i][row] = true;
+			/*Detach to let the thread end on its own after the object has been deleted*/
+			thread_pool[i][row]->detach();
 			delete thread_pool[i][row];
 		}
 	}
@@ -893,8 +894,9 @@ void keyboardUp(unsigned char key, int x, int y)
 	switch (key)
 	{
 	case 'p':
-	case '27':
-		exit(0);
+	case 27:
+		glutLeaveFullScreen();
+		glutLeaveMainLoop();
 	case 'e':
 	case 'q':
 		movement_up = 0;
@@ -1076,6 +1078,7 @@ int main(int argc, char** argv)
 
 	initialize();
 	atexit(freeResourcers);
+	glutFullScreen();
 	initGL(1024, 768);
 
 	glutMainLoop();
