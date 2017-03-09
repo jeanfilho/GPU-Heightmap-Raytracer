@@ -516,9 +516,9 @@ void copyPointBuffer()
 
 	/*Set the camera position in the correct position inside the buffer based on the distance from cell origin to point_buffer origin*/
 	camera_point_buffer = 
-		glm::vec3((section_position.x - cell_position.x * glm::pow(2.0f, LOD_levels - 1)) + (point_buffer_resolution.x*2 - 2) * glm::pow(2.0f, LOD_levels - 3),
+		glm::vec3((section_position.x - cell_position.x * glm::pow(2.0f, LOD_levels - 1)) + (point_buffer_resolution.x - 1) * glm::pow(2.0f, LOD_levels - 2),
 				  camera_position.y,
-				  (section_position.y - cell_position.y * glm::pow(2.0f, LOD_levels - 1)) + (point_buffer_resolution.y*2 - 2) * glm::pow(2.0f, LOD_levels - 3));
+				  (section_position.y - cell_position.y * glm::pow(2.0f, LOD_levels - 1)) + (point_buffer_resolution.y - 1) * glm::pow(2.0f, LOD_levels - 2));
 
 	for (int i = LOD_levels - 1; i >= 0; i--)
 	{
