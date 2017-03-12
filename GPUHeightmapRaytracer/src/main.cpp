@@ -45,7 +45,7 @@
 //============================
 
 // Filenames
-std::string point_cloud_file = "points3.las";
+std::string point_cloud_file = "autzen.las";
 std::string color_map_file = "autzen.jpg";
 
 // Camera related
@@ -151,7 +151,7 @@ void readLASHeader(std::string filename)
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
 
 	/*Calculate area per point to set cell dimension*/
-	float value = .25f;
+	float value = 1.0f;
 	cell_size = glm::vec3(value, value, value);
 	boundaries = glm::vec2(deltaX / cell_size.x, deltaY / cell_size.y);
 
@@ -205,13 +205,13 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 		fY = static_cast<float>(p.GetY() - header.GetMinY()) / cell_size.y;
 		fZ = static_cast<float>(p.GetZ() - header.GetMinZ()) / cell_size.z;
 
-		/* Skip if the point is outside of the section */
-		if (fX < origin.x || fX >= higher_boundary.x || fY < origin.y || fY >= higher_boundary.y ||	p.GetClassification().GetClass() == 7)
-			continue;
-
 		/* Calculate point position for the finest LOD in this section */
 		x = static_cast<int>(glm::floor(fX - origin.x));
 		y = static_cast<int>(glm::floor(fY - origin.y));
+
+		/* Skip if the point is outside of the section */
+		if (x < 0 || x >= LOD_resolutions[0] || y < 0 || y >= LOD_resolutions[0] || p.GetClassification().GetClass() == 7)
+			continue;
 
 		/* Calculate LOD offsets in section from the coarsest to the finest */
 		for (int i = LOD_levels - 1; i >= 0; i--)
