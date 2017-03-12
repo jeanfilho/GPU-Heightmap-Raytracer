@@ -151,7 +151,7 @@ void readLASHeader(std::string filename)
 	std::cout << "DiffX: " << deltaX << " DiffY: " << deltaY << std::endl;
 
 	/*Calculate area per point to set cell dimension*/
-	float value = 1.0f;
+	float value = 2.0f;
 	cell_size = glm::vec3(value, value, value);
 	boundaries = glm::vec2(deltaX / cell_size.x, deltaY / cell_size.y);
 
@@ -460,7 +460,7 @@ void manageSections()
 * than passing every line at a time
 *
 */
-void copyPointBuffer()
+void preparePointBuffer()
 {
 	glm::vec2 bottom_left, top_right, offset;
 	int minX, maxX, minY, maxY;
@@ -619,7 +619,10 @@ void copyPointBuffer()
 
 		row_offset++;
 	}
+}
 
+void copyPointBuffer()
+{
 	/*Send point buffer to the gpu*/
 	checkCudaErrors(cudaMemcpy(d_point_buffer, h_point_buffer, sizeof(float) * point_buffer_resolution.x * stride_x * point_buffer_resolution.y, cudaMemcpyHostToDevice));
 	checkCudaErrors(cudaMemcpy(d_color_map, h_color_map, sizeof(CudaSpace::Color) * LOD_resolutions[0] * LOD_resolutions[0], cudaMemcpyHostToDevice));
@@ -956,6 +959,7 @@ void draw()
 	manageSections();
 
 	/* render the scene here */
+	preparePointBuffer();
 	copyPointBuffer();
 	updateTexture();
 	renderTexture();
