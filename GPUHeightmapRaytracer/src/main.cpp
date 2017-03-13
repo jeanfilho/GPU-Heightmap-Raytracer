@@ -189,10 +189,6 @@ void loadLASToSection(std::string filename, glm::vec2 origin, bool *exit_control
 	/*After the reader has been created, you can access members of the Public Header Block*/
 	liblas::Header const& header = reader.GetHeader();
 
-	/*Define section boundaries*/
-	glm::vec2 higher_boundary;
-	higher_boundary = origin + static_cast<float>(point_buffer_resolution.x) * (glm::pow(2.0f, LOD_levels - 1));
-
 	/*Iterate through point records and calculate the height contribution to each neighboring grid cell*/
 	while (reader.ReadNextPoint())
 	{
